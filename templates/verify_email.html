@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Email - Authentication System{% endblock %}
+
+{% block content %}
+<div class="auth-form">
+    <h2>Verify Your Email Address</h2>
+    <p>A 6-digit verification code has been sent to your email address.</p>
+    
+    {% if EMAIL_CONFIG.simulation_mode %}
+    <div class="simulation-notice">
+        <strong>Simulation Mode:</strong> Check your terminal/console for the verification code!
+    </div>
+    {% endif %}
+    
+    <form method="POST">
+        <div class="form-group">
+            <label for="code">Verification Code:</label>
+            <input type="text" id="code" name="code" maxlength="6" required 
+                   placeholder="Enter 6-digit code">
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Verify</button>
+    </form>
+    
+    <p class="auth-link">
+        <a href="{{ url_for('register') }}">Back to registration</a>
+    </p>
+</div>
+{% endblock %}

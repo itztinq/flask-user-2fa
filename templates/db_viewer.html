@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block title %}Database Viewer - Admin{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>Database Viewer 🔧 <small>Admin Only</small></h2>
+    
+    <div class="admin-badge">
+        <span class="badge admin">Administrator Access</span>
+    </div>
+    
+    <div class="table-section">
+        <h3>Users Table ({{ users|length }} users)</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Verified</th>
+                    <th>Created</th>
+                    <th>Last Login</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>
+                        {{ user.username }}
+                        {% if user.username == 'admin' %}
+                        <span class="badge admin">Admin</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ user.email }}</td>
+                    <td>{{ "✅" if user.is_verified else "❌" }}</td>
+                    <td>
+                        {% if user.created_at_formatted %}
+                            {{ user.created_at_formatted }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user.last_login_formatted %}
+                            {{ user.last_login_formatted }}
+                        {% else %}
+                            Never
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center;">No users found</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="table-section">
+        <h3>Verification Codes (Last 20)</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>User ID</th>
+                    <th>Code</th>
+                    <th>Purpose</th>
+                    <th>Expires</th>
+                    <th>Used</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for code in verification_codes %}
+                <tr>
+                    <td>{{ code.id }}</td>
+                    <td>{{ code.user_id }}</td>
+                    <td>{{ code.code }}</td>
+                    <td>{{ code.purpose }}</td>
+                    <td>
+                        {% if code.expires_at_formatted %}
+                            {{ code.expires_at_formatted }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
+                    <td>{{ "✅" if code.used else "❌" }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center;">No verification codes found</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="table-section">
+        <h3>Active Sessions ({{ sessions|length }} active)</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>User ID</th>
+                    <th>Token</th>
+                    <th>Expires</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for session in sessions %}
+                <tr>
+                    <td>{{ session.id }}</td>
+                    <td>{{ session.user_id }}</td>
+                    <td title="{{ session.session_token }}">
+                        {{ session.session_token[:20] }}...
+                    </td>
+                    <td>
+                        {% if session.expires_at_formatted %}
+                            {{ session.expires_at_formatted }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if session.created_at_formatted %}
+                            {{ session.created_at_formatted }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" style="text-align: center;">No active sessions</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="dashboard-actions">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Back to Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Authentication System{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>Welcome, {{ username }}! 🎉</h2>
+    
+    {% if is_admin %}
+    <div class="admin-badge">
+        <span class="badge admin">Administrator</span>
+    </div>
+    {% endif %}
+    
+    <div class="user-info">
+        <h3>Your Profile Information</h3>
+        <div class="info-grid">
+            <div class="info-item">
+                <strong>Username:</strong> {{ username }}
+            </div>
+            <div class="info-item">
+                <strong>Email:</strong> {{ email }}
+            </div>
+            <div class="info-item">
+                <strong>Last Login:</strong> {{ last_login }}
+            </div>
+            <div class="info-item">
+                <strong>Status:</strong> <span class="status-verified">Verified ✓</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="security-features">
+        <h3>Active Security Features</h3>
+        <ul>
+            <li>✓ Password Hashing with Salt</li>
+            <li>✓ Two-Factor Authentication (2FA)</li>
+            <li>✓ Secure Session Management</li>
+            <li>✓ HTTP-only Cookies</li>
+            <li>✓ CSRF Protection</li>
+        </ul>
+    </div>
+    
+    <div class="dashboard-actions">
+        {% if is_admin %}
+        <a href="{{ url_for('db_viewer') }}" class="btn btn-info">Database Viewer</a>
+        {% endif %}
+        <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+    </div>
+</div>
+{% endblock %}
