@@ -4,10 +4,21 @@
 
 {% block content %}
 <div class="dashboard">
-    <h2>Database Viewer 🔧 <small>Admin Only</small></h2>
+    <h2>Database Viewer 🔧 <small>Admin Only - Showing Hashed Data</small></h2>
     
     <div class="admin-badge">
         <span class="badge admin">Administrator Access</span>
+    </div>
+    
+    <!-- Security Notice -->
+    <div class="security-notice">
+        <strong>🔒 Security Demonstration:</strong> 
+        <ul>
+            <li>Passwords are stored as <strong>hashes</strong> (not plain text)</li>
+            <li>Each hash contains embedded <strong>salt</strong></li>
+            <li>Same password → Different hash for each user</li>
+            <li>Verification codes are time-limited and single-use</li>
+        </ul>
     </div>
     
     <div class="table-section">
@@ -19,6 +30,7 @@
                     <th>Username</th>
                     <th>Email</th>
                     <th>Verified</th>
+                    <th>Password Hash</th>
                     <th>Created</th>
                     <th>Last Login</th>
                 </tr>
@@ -35,6 +47,15 @@
                     </td>
                     <td>{{ user.email }}</td>
                     <td>{{ "✅" if user.is_verified else "❌" }}</td>
+                    <td title="{{ user.password_hash }}">
+                        <code class="hash-display">{{ user.password_hash[:30] }}...</code>
+                        <div class="hash-info">
+                            <small>Algorithm: {{ user.password_hash.split(':')[0] if ':' in user.password_hash else 'Unknown' }}</small>
+                            {% if ':' in user.password_hash %}
+                            <br><small>Salt: {{ user.password_hash.split(':')[2].split('$')[0] if user.password_hash.count(':') >= 2 else 'Embedded' }}</small>
+                            {% endif %}
+                        </div>
+                    </td>
                     <td>
                         {% if user.created_at_formatted %}
                             {{ user.created_at_formatted }}
@@ -43,7 +64,7 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if user.last_login_formatted %}
+                        {% if user.last_login_formatted and user.last_login_formatted != 'Never' %}
                             {{ user.last_login_formatted }}
                         {% else %}
                             Never
@@ -52,7 +73,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="6" style="text-align: center;">No users found</td>
+                    <td colspan="7" style="text-align: center;">No users found</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -60,15 +81,17 @@
     </div>
 
     <div class="table-section">
-        <h3>Verification Codes (Last 20)</h3>
+        <h3>Verification Codes (Last 20) - 2FA System</h3>
         <table class="data-table">
             <thead>
                 <tr>
                     <th>ID</th>
                     <th>User ID</th>
+                    <th>Username</th>
                     <th>Code</th>
                     <th>Purpose</th>
                     <th>Expires</th>
+                    <th>Created</th>
                     <th>Used</th>
                 </tr>
             </thead>
@@ -77,8 +100,17 @@
                 <tr>
                     <td>{{ code.id }}</td>
                     <td>{{ code.user_id }}</td>
-                    <td>{{ code.code }}</td>
-                    <td>{{ code.purpose }}</td>
+                    <td>{{ code.username or 'Unknown' }}</td>
+                    <td><code class="code-display">{{ code.code }}</code></td>
+                    <td>
+                        {% if code.purpose == 'registration' %}
+                        <span class="badge badge-registration">Registration</span>
+                        {% elif code.purpose == 'login' %}
+                        <span class="badge badge-login">Login 2FA</span>
+                        {% else %}
+                        {{ code.purpose }}
+                        {% endif %}
+                    </td>
                     <td>
                         {% if code.expires_at_formatted %}
                             {{ code.expires_at_formatted }}
@@ -86,11 +118,24 @@
                             N/A
                         {% endif %}
                     </td>
-                    <td>{{ "✅" if code.used else "❌" }}</td>
+                    <td>
+                        {% if code.created_at_formatted %}
+                            {{ code.created_at_formatted }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if code.used %}
+                        <span class="badge badge-used">✅ Used</span>
+                        {% else %}
+                        <span class="badge badge-unused">❌ Unused</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="6" style="text-align: center;">No verification codes found</td>
+                    <td colspan="8" style="text-align: center;">No verification codes found</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -104,6 +149,7 @@
                 <tr>
                     <th>ID</th>
                     <th>User ID</th>
+                    <th>Username</th>
                     <th>Token</th>
                     <th>Expires</th>
                     <th>Created</th>
@@ -114,8 +160,12 @@
                 <tr>
                     <td>{{ session.id }}</td>
                     <td>{{ session.user_id }}</td>
+                    <td>{{ session.username or 'Unknown' }}</td>
                     <td title="{{ session.session_token }}">
-                        {{ session.session_token[:20] }}...
+                        <code class="token-display">{{ session.session_token[:20] }}...</code>
+                        <div class="token-info">
+                            <small>Length: {{ session.session_token|length }} chars</small>
+                        </div>
                     </td>
                     <td>
                         {% if session.expires_at_formatted %}
@@ -134,12 +184,13 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="5" style="text-align: center;">No active sessions</td>
+                    <td colspan="6" style="text-align: center;">No active sessions</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+    
 
     <div class="dashboard-actions">
         <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Back to Dashboard</a>

@@ -319,15 +319,15 @@ def dashboard():
 
 @app.route('/admin/db-viewer')
 def db_viewer():
-    """Database viewer - ADMIN ONLY - UPDATED with proper datetime handling"""
+    """Database viewer - ADMIN ONLY"""
     if not session.get('is_admin', False):
         flash('Access denied. Admin privileges required.', 'error')
         return redirect(url_for('dashboard'))
     
     try:
-        # Get all users - UPDATED: No more timestamp conversion needed
+        # Get all users - INCLUDING PASSWORD HASHES
         users = db.execute_query("""
-            SELECT *, 
+            SELECT id, username, email, password_hash, is_verified,
                    datetime(created_at) as created_at_formatted,
                    CASE 
                        WHEN last_login IS NULL THEN 'Never' 
@@ -337,7 +337,7 @@ def db_viewer():
             ORDER BY id DESC
         """, fetchall=True)
         
-        # Get verification codes (last 20) - UPDATED: No more timestamp conversion
+        # Get verification codes (last 20)
         verification_codes = db.execute_query("""
             SELECT vc.*, u.username,
                    datetime(vc.expires_at) as expires_at_formatted,
@@ -348,7 +348,7 @@ def db_viewer():
             LIMIT 20
         """, fetchall=True)
         
-        # Get active sessions - UPDATED: No more timestamp conversion
+        # Get active sessions
         sessions = db.execute_query("""
             SELECT s.*, u.username,
                    datetime(s.expires_at) as expires_at_formatted,
