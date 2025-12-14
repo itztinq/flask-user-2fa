@@ -1,38 +1,39 @@
 {% extends "base.html" %}
 
-{% block title %}Database Viewer - Admin{% endblock %}
+{% block title %}Database Viewer{% endblock %}
 
 {% block content %}
 <div class="dashboard">
-    <h2>Database Viewer 🔧 <small>Admin Only - Showing Hashed Data</small></h2>
+    <h2>Database Viewer</h2>
     
-    <div class="admin-badge">
-        <span class="badge admin">Administrator Access</span>
-    </div>
-    
-    <!-- Security Notice -->
     <div class="security-notice">
-        <strong>🔒 Security Demonstration:</strong> 
-        <ul>
-            <li>Passwords are stored as <strong>hashes</strong> (not plain text)</li>
-            <li>Each hash contains embedded <strong>salt</strong></li>
-            <li>Same password → Different hash for each user</li>
-            <li>Verification codes are time-limited and single-use</li>
-        </ul>
+        <strong>Security Notice:</strong> This page displays sensitive information. 
+        Access requires database_viewer:read permission.
     </div>
-    
+
+    <!-- Users Table -->
     <div class="table-section">
-        <h3>Users Table ({{ users|length }} users)</h3>
+        <h3>Users Table</h3>
+        <div class="table-controls">
+            <span>Total Users: {{ users|length }}</span>
+            {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+            <button class="btn btn-small" onclick="showEditModal('user')">Add User</button>
+            {% endif %}
+        </div>
+        
         <table class="data-table">
             <thead>
                 <tr>
                     <th>ID</th>
                     <th>Username</th>
                     <th>Email</th>
+                    <th>Role</th>
                     <th>Verified</th>
-                    <th>Password Hash</th>
-                    <th>Created</th>
+                    <th>Created At</th>
                     <th>Last Login</th>
+                    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+                    <th>Actions</th>
+                    {% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -40,161 +41,303 @@
                 <tr>
                     <td>{{ user.id }}</td>
                     <td>
-                        {{ user.username }}
-                        {% if user.username == 'admin' %}
-                        <span class="badge admin">Admin</span>
+                        <strong>{{ user.username }}</strong>
+                        {% if user.username == session.username %}
+                        <span class="badge-current">(You)</span>
                         {% endif %}
                     </td>
                     <td>{{ user.email }}</td>
-                    <td>{{ "✅" if user.is_verified else "❌" }}</td>
-                    <td title="{{ user.password_hash }}">
-                        <code class="hash-display">{{ user.password_hash[:30] }}...</code>
-                        <div class="hash-info">
-                            <small>Algorithm: {{ user.password_hash.split(':')[0] if ':' in user.password_hash else 'Unknown' }}</small>
-                            {% if ':' in user.password_hash %}
-                            <br><small>Salt: {{ user.password_hash.split(':')[2].split('$')[0] if user.password_hash.count(':') >= 2 else 'Embedded' }}</small>
-                            {% endif %}
-                        </div>
+                    <td>
+                        <span class="role-badge {{ user.role }}">
+                            {{ user.role }}
+                        </span>
                     </td>
                     <td>
-                        {% if user.created_at_formatted %}
-                            {{ user.created_at_formatted }}
+                        {% if user.is_verified %}
+                        <span class="status-verified">✓</span>
                         {% else %}
-                            N/A
+                        <span class="status-pending">✗</span>
                         {% endif %}
                     </td>
+                    <td>{{ user.created_at_formatted }}</td>
+                    <td>{{ user.last_login_formatted }}</td>
+                    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
                     <td>
-                        {% if user.last_login_formatted and user.last_login_formatted != 'Never' %}
-                            {{ user.last_login_formatted }}
-                        {% else %}
-                            Never
+                        <button class="btn btn-small" onclick="editUser('{{ user.id }}')">Edit</button>
+                        {% if user.id != session.user_id %}
+                        <button class="btn btn-small btn-danger" onclick="deleteUser('{{ user.id }}', '{{ user.username }}')">Delete</button>
                         {% endif %}
                     </td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="7" style="text-align: center;">No users found</td>
+                    {% endif %}
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
+    <!-- Active Sessions -->
     <div class="table-section">
-        <h3>Verification Codes (Last 20) - 2FA System</h3>
+        <h3>Active Sessions</h3>
+        <div class="table-controls">
+            <span>Active Sessions: {{ sessions|length }}</span>
+            {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+            <button class="btn btn-small btn-danger" onclick="clearAllSessions()">Clear All</button>
+            {% endif %}
+        </div>
+        
         <table class="data-table">
             <thead>
                 <tr>
                     <th>ID</th>
-                    <th>User ID</th>
-                    <th>Username</th>
+                    <th>User</th>
+                    <th>Token Preview</th>
+                    <th>Created</th>
+                    <th>Expires</th>
+                    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+                    <th>Actions</th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for session_data in sessions %}
+                <tr>
+                    <td>{{ session_data.id }}</td>
+                    <td>{{ session_data.username or 'Unknown' }}</td>
+                    <td>
+                        <code>{{ session_data.session_token[:20] }}...</code>
+                    </td>
+                    <td>{{ session_data.created_at_formatted }}</td>
+                    <td>{{ session_data.expires_at_formatted }}</td>
+                    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+                    <td>
+                        <button class="btn btn-small btn-danger" onclick="deleteSession('{{ session_data.id }}')">Revoke</button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Verification Codes -->
+    <div class="table-section">
+        <h3>Recent Verification Codes</h3>
+        <div class="table-controls">
+            <span>Showing last {{ verification_codes|length }} codes</span>
+        </div>
+        
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>User</th>
                     <th>Code</th>
                     <th>Purpose</th>
-                    <th>Expires</th>
-                    <th>Created</th>
                     <th>Used</th>
+                    <th>Expires</th>
                 </tr>
             </thead>
             <tbody>
                 {% for code in verification_codes %}
                 <tr>
                     <td>{{ code.id }}</td>
-                    <td>{{ code.user_id }}</td>
                     <td>{{ code.username or 'Unknown' }}</td>
-                    <td><code class="code-display">{{ code.code }}</code></td>
+                    <td><code>{{ code.code }}</code></td>
                     <td>
                         {% if code.purpose == 'registration' %}
-                        <span class="badge badge-registration">Registration</span>
+                        <span class="badge-registration">Registration</span>
                         {% elif code.purpose == 'login' %}
-                        <span class="badge badge-login">Login 2FA</span>
+                        <span class="badge-login">Login</span>
                         {% else %}
-                        {{ code.purpose }}
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if code.expires_at_formatted %}
-                            {{ code.expires_at_formatted }}
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if code.created_at_formatted %}
-                            {{ code.created_at_formatted }}
-                        {% else %}
-                            N/A
+                        <span>{{ code.purpose }}</span>
                         {% endif %}
                     </td>
                     <td>
                         {% if code.used %}
-                        <span class="badge badge-used">✅ Used</span>
+                        <span class="status-verified">✓</span>
                         {% else %}
-                        <span class="badge badge-unused">❌ Unused</span>
+                        <span class="status-pending">✗</span>
                         {% endif %}
                     </td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="8" style="text-align: center;">No verification codes found</td>
+                    <td>{{ code.expires_at_formatted }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
-    <div class="table-section">
-        <h3>Active Sessions ({{ sessions|length }} active)</h3>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>User ID</th>
-                    <th>Username</th>
-                    <th>Token</th>
-                    <th>Expires</th>
-                    <th>Created</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for session in sessions %}
-                <tr>
-                    <td>{{ session.id }}</td>
-                    <td>{{ session.user_id }}</td>
-                    <td>{{ session.username or 'Unknown' }}</td>
-                    <td title="{{ session.session_token }}">
-                        <code class="token-display">{{ session.session_token[:20] }}...</code>
-                        <div class="token-info">
-                            <small>Length: {{ session.session_token|length }} chars</small>
-                        </div>
-                    </td>
-                    <td>
-                        {% if session.expires_at_formatted %}
-                            {{ session.expires_at_formatted }}
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if session.created_at_formatted %}
-                            {{ session.created_at_formatted }}
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="6" style="text-align: center;">No active sessions</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <!-- Database Actions -->
+    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+    <div class="info-card">
+        <h3>Database Actions</h3>
+        <div class="action-buttons">
+            <button class="btn btn-warning" onclick="cleanupDatabase()">
+                Cleanup Expired Data
+            </button>
+            <a href="{{ url_for('db_viewer') }}" class="btn btn-info">
+                Refresh
+            </a>
+        </div>
     </div>
-    
+    {% endif %}
+</div>
 
-    <div class="dashboard-actions">
-        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Back to Dashboard</a>
-        <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+<!-- Edit User Modal -->
+<div id="editModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <h3 id="modalTitle">Edit User</h3>
+        <form id="userForm" method="POST">
+            <input type="hidden" id="userId" name="user_id">
+            
+            <div class="form-group">
+                <label for="editUsername">Username:</label>
+                <input type="text" id="editUsername" name="username" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="editEmail">Email:</label>
+                <input type="email" id="editEmail" name="email" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="editRole">Role:</label>
+                <select id="editRole" name="role" required>
+                    <option value="">-- Select Role --</option>
+                    {% for role_key, role_info in ORGANIZATIONAL_ROLES.items() %}
+                    <option value="{{ role_key }}">{{ role_info.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="editVerified">Verified:</label>
+                <select id="editVerified" name="verified">
+                    <option value="1">Yes</option>
+                    <option value="0">No</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="editPassword">New Password (optional):</label>
+                <input type="password" id="editPassword" name="password" 
+                       placeholder="Leave blank to keep current">
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+        </form>
     </div>
 </div>
+
+<script>
+// Modal functions
+function showEditModal(type) {
+    if (type === 'user') {
+        document.getElementById('modalTitle').textContent = 'Add New User';
+        document.getElementById('userForm').reset();
+        document.getElementById('userId').value = '';
+    }
+    document.getElementById('editModal').style.display = 'block';
+}
+
+function closeModal() {
+    document.getElementById('editModal').style.display = 'none';
+}
+
+function editUser(userId) {
+    // Find user in the table and populate form
+    const row = document.querySelector('tr[data-user-id="' + userId + '"]');
+    if (row) {
+        const cells = row.cells;
+        document.getElementById('userId').value = userId;
+        document.getElementById('editUsername').value = cells[1].querySelector('strong').textContent;
+        document.getElementById('editEmail').value = cells[2].textContent;
+        document.getElementById('editRole').value = cells[3].querySelector('.role-badge').textContent.trim();
+        document.getElementById('editVerified').value = cells[4].querySelector('.status-verified') ? '1' : '0';
+        document.getElementById('modalTitle').textContent = 'Edit User';
+        document.getElementById('editModal').style.display = 'block';
+    }
+}
+
+// Form submission
+document.getElementById('userForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const userId = formData.get('user_id');
+    const url = userId ? '/admin/update-user' : '/admin/create-user';
+    
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (response.ok) {
+            alert('User saved successfully');
+            window.location.reload();
+        } else {
+            const error = await response.text();
+            alert('Error saving user: ' + error);
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+});
+
+// Delete functions
+function deleteUser(userId, username) {
+    if (confirm('Are you sure you want to delete user "' + username + '"?')) {
+        fetch('/admin/delete-user/' + userId, {
+            method: 'POST'
+        }).then(function(response) {
+            if (response.ok) {
+                alert('User deleted successfully');
+                window.location.reload();
+            }
+        });
+    }
+}
+
+function deleteSession(sessionId) {
+    if (confirm('Revoke this session?')) {
+        fetch('/admin/delete-session/' + sessionId, {
+            method: 'POST'
+        }).then(function(response) {
+            if (response.ok) window.location.reload();
+        });
+    }
+}
+
+function clearAllSessions() {
+    if (confirm('Clear ALL active sessions? All users will be logged out.')) {
+        fetch('/admin/clear-sessions', {
+            method: 'POST'
+        }).then(function(response) {
+            if (response.ok) window.location.reload();
+        });
+    }
+}
+
+function cleanupDatabase() {
+    if (confirm('Clean up all expired data (verification codes, sessions)?')) {
+        fetch('/admin/cleanup', {
+            method: 'POST'
+        }).then(function(response) {
+            if (response.ok) {
+                alert('Cleanup completed');
+                window.location.reload();
+            }
+        });
+    }
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modal = document.getElementById('editModal');
+    if (event.target === modal) {
+        modal.style.display = 'none';
+    }
+}
+</script>
 {% endblock %}

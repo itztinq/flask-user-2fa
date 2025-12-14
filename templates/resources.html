@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Available Resources{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>Available Resources</h2>
+    
+    <div class="info-card">
+        <h3>Your Accessible Resources</h3>
+        <p>Your current role: <span class="role-badge {{ user_role }}">{{ user_role }}</span></p>
+        
+        <div class="resources-grid">
+            {% for resource in resources %}
+            <div class="resource-card">
+                <h4>{{ resource.title }}</h4>
+                <p>{{ resource.description }}</p>
+                
+                <div class="resource-meta">
+                    <span class="access-type {{ 'jit' if 'JIT' in resource.access_type else 'regular' }}">
+                        {{ resource.access_type }}
+                    </span>
+                    <span class="role-badge {{ resource.role }}">
+                        {{ resource.role }}
+                    </span>
+                </div>
+                
+                <div class="resource-actions">
+                    <strong>Allowed Actions:</strong>
+                    <div class="action-badges">
+                        {% for action in resource.actions %}
+                        <span class="action-badge">{{ action }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                {% if resource.expires_at %}
+                <div class="resource-expiry">
+                    <small>⏰ Expires: {{ resource.expires_at }}</small>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

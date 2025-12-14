@@ -19,6 +19,7 @@ class Database:
                 username TEXT UNIQUE NOT NULL,
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
+                role TEXT DEFAULT 'user',
                 is_verified BOOLEAN DEFAULT FALSE,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_login DATETIME NULL
@@ -51,13 +52,71 @@ class Database:
             )
         ''')
         
+        # User roles table (for permanent role assignments)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                role_id TEXT NOT NULL,
+                assigned_by INTEGER,
+                assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                FOREIGN KEY (assigned_by) REFERENCES users (id)
+            )
+        ''')
+        
+        # Just-In-Time permissions table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS jit_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                permission_type TEXT NOT NULL,
+                granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME NOT NULL,
+                granted_by INTEGER,
+                is_active BOOLEAN DEFAULT TRUE,
+                reason TEXT,
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                FOREIGN KEY (granted_by) REFERENCES users (id)
+            )
+        ''')
+        
+        # Audit logs table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                action_type TEXT NOT NULL,
+                resource TEXT,
+                description TEXT,
+                ip_address TEXT,
+                user_agent TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # Resource permissions table (defines what each role can do)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS resource_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role_id TEXT NOT NULL,
+                resource_name TEXT NOT NULL,
+                permission TEXT NOT NULL,  -- 'read', 'write', 'delete', 'manage'
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # Create indexes for better performance
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_verification_codes_expires ON verification_codes(expires_at)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_jit_permissions_expires ON jit_permissions(expires_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_jit_permissions_user ON jit_permissions(user_id, is_active)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)')
         
         conn.commit()
         conn.close()
-        print("✅ Database tables initialized successfully")
+        print("Database tables initialized successfully")
     
     def get_connection(self):
         """Returns database connection"""
@@ -99,10 +158,10 @@ class Database:
         return self.execute_query(query, (username, email), fetchone=True)
     
     def create_user(self, username, email, password_hash):
-        """Creates a new user - UPDATED to use proper datetime"""
+        """Creates a new user"""
         query = """
-            INSERT INTO users (username, email, password_hash, is_verified, created_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
+            INSERT INTO users (username, email, password_hash, is_verified, created_at, role)
+            VALUES (?, ?, ?, ?, datetime('now'), 'user')
         """
         try:
             self.execute_query(query, (username, email, password_hash, False))
@@ -129,7 +188,7 @@ class Database:
         return self.execute_query(query, (user_id,), fetchone=True)
     
     def save_verification_code(self, user_id, code, purpose, expires_minutes=15):
-        """Saves verification code - UPDATED to use proper datetime with 15min expiration"""
+        """Saves verification code"""
         expires_at = datetime.now() + timedelta(minutes=expires_minutes)
         
         query = """
@@ -179,9 +238,9 @@ class Database:
             return False
     
     def validate_session(self, session_token):
-        """Validates session token - UPDATED to use datetime comparison"""
+        """Validates session token"""
         query = """
-            SELECT s.*, u.username, u.email, u.is_verified
+            SELECT s.*, u.username, u.email, u.is_verified, u.role
             FROM sessions s 
             JOIN users u ON s.user_id = u.id 
             WHERE s.session_token = ? AND datetime(s.expires_at) > datetime('now') AND u.is_verified = TRUE
@@ -204,7 +263,7 @@ class Database:
         )
     
     def cleanup_expired_data(self):
-        """Cleans up expired verification codes and sessions - UPDATED to use datetime"""
+        """Cleans up expired verification codes and sessions"""
         try:
             # Delete expired verification codes
             self.execute_query(
@@ -216,26 +275,164 @@ class Database:
                 "DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now')"
             )
             
-            print("✅ Expired data cleaned up successfully")
+            # Deactivate expired JIT permissions
+            self.execute_query(
+                "UPDATE jit_permissions SET is_active = FALSE WHERE datetime(expires_at) <= datetime('now')"
+            )
+            
+            print("Expired data cleaned up successfully")
             return True
         except Exception as e:
             print(f"Error during cleanup: {e}")
             return False
     
-    def get_database_stats(self):
-        """Gets database statistics for admin panel"""
-        stats = {}
-        
-        # User count
-        result = self.execute_query("SELECT COUNT(*) as count FROM users", fetchone=True)
-        stats['total_users'] = result['count'] if result else 0
-        
-        # Verified users
-        result = self.execute_query("SELECT COUNT(*) as count FROM users WHERE is_verified = TRUE", fetchone=True)
-        stats['verified_users'] = result['count'] if result else 0
-        
-        # Active sessions
-        result = self.execute_query("SELECT COUNT(*) as count FROM sessions WHERE datetime(expires_at) > datetime('now')", fetchone=True)
-        stats['active_sessions'] = result['count'] if result else 0
-        
-        return stats
+    def assign_user_role(self, user_id, role_id, assigned_by=None):
+        """Assigns a role to a user"""
+        try:
+            # Update user's role in users table
+            self.execute_query(
+                "UPDATE users SET role = ? WHERE id = ?",
+                (role_id, user_id)
+            )
+            
+            # Log the assignment in user_roles table
+            query = """
+                INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at)
+                VALUES (?, ?, ?, datetime('now'))
+            """
+            self.execute_query(query, (user_id, role_id, assigned_by))
+            return True
+        except Exception as e:
+            print(f"Error assigning role: {e}")
+            return False
+    
+    def get_user_role(self, user_id):
+        """Gets user's current role"""
+        query = "SELECT role FROM users WHERE id = ?"
+        result = self.execute_query(query, (user_id,), fetchone=True)
+        return result['role'] if result else 'user'
+    
+    def request_jit_permission(self, user_id, permission_type, duration_minutes, granted_by=None, reason=None):
+        """Requests JIT permission"""
+        try:
+            expires_at = datetime.now() + timedelta(minutes=duration_minutes)
+            
+            query = """
+                INSERT INTO jit_permissions (user_id, permission_type, granted_at, expires_at, granted_by, is_active, reason)
+                VALUES (?, ?, datetime('now'), ?, ?, TRUE, ?)
+            """
+            self.execute_query(query, (user_id, permission_type, expires_at.strftime('%Y-%m-%d %H:%M:%S'), granted_by, reason))
+            return True
+        except Exception as e:
+            print(f"Error requesting JIT permission: {e}")
+            return False
+    
+    def get_active_jit_permissions(self, user_id):
+        """Gets active JIT permissions for a user"""
+        query = """
+            SELECT permission_type, granted_at, expires_at, reason,
+                   datetime(granted_at) as granted_at_formatted,
+                   datetime(expires_at) as expires_at_formatted
+            FROM jit_permissions 
+            WHERE user_id = ? AND is_active = TRUE AND datetime(expires_at) > datetime('now')
+            ORDER BY granted_at DESC
+        """
+        return self.execute_query(query, (user_id,), fetchall=True) or []
+    
+    def has_jit_permission(self, user_id, permission_type):
+        """Checks if user has active JIT permission"""
+        query = """
+            SELECT id FROM jit_permissions 
+            WHERE user_id = ? AND permission_type = ? AND is_active = TRUE 
+            AND datetime(expires_at) > datetime('now')
+        """
+        result = self.execute_query(query, (user_id, permission_type), fetchone=True)
+        return result is not None
+    
+    def log_action(self, user_id, action_type, description, resource=None, ip_address=None, user_agent=None):
+        """Logs an action to audit logs"""
+        try:
+            query = """
+                INSERT INTO audit_logs (user_id, action_type, resource, description, ip_address, user_agent, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            """
+            self.execute_query(query, (user_id, action_type, resource, description, ip_address, user_agent))
+            return True
+        except Exception as e:
+            print(f"Error logging action: {e}")
+            return False
+    
+    def get_all_users_with_roles(self):
+        """Gets all users with their roles"""
+        query = """
+            SELECT u.id, u.username, u.email, u.role, u.is_verified,
+                   datetime(u.created_at) as created_at,
+                   datetime(u.last_login) as last_login,
+                   GROUP_CONCAT(DISTINCT jp.permission_type) as jit_permissions
+            FROM users u
+            LEFT JOIN jit_permissions jp ON u.id = jp.user_id AND jp.is_active = TRUE AND datetime(jp.expires_at) > datetime('now')
+            GROUP BY u.id
+            ORDER BY u.id DESC
+        """
+        return self.execute_query(query, fetchall=True) or []
+    
+    def get_audit_logs(self, limit=100):
+        """Gets audit logs"""
+        query = """
+            SELECT al.*, u.username,
+                   datetime(al.timestamp) as timestamp_formatted
+            FROM audit_logs al
+            LEFT JOIN users u ON al.user_id = u.id
+            ORDER BY al.timestamp DESC
+            LIMIT ?
+        """
+        return self.execute_query(query, (limit,), fetchall=True) or []
+    
+    def get_all_users_with_details(self):
+        """Get all users with detailed information"""
+        query = """
+            SELECT u.*,
+                   GROUP_CONCAT(DISTINCT jp.permission_type) as active_jit_permissions,
+                   GROUP_CONCAT(DISTINCT ur.role_id) as role_history
+            FROM users u
+            LEFT JOIN jit_permissions jp ON u.id = jp.user_id 
+                AND jp.is_active = TRUE 
+                AND datetime(jp.expires_at) > datetime('now')
+            LEFT JOIN user_roles ur ON u.id = ur.user_id
+            GROUP BY u.id
+            ORDER BY u.id DESC
+        """
+        return self.execute_query(query, fetchall=True) or []
+    
+    def get_role_assignments(self, user_id=None):
+        """Get role assignments"""
+        if user_id:
+            query = """
+                SELECT ur.*, u1.username as user_username, u2.username as assigned_by_username
+                FROM user_roles ur
+                JOIN users u1 ON ur.user_id = u1.id
+                LEFT JOIN users u2 ON ur.assigned_by = u2.id
+                WHERE ur.user_id = ?
+                ORDER BY ur.assigned_at DESC
+            """
+            return self.execute_query(query, (user_id,), fetchall=True) or []
+        else:
+            query = """
+                SELECT ur.*, u1.username as user_username, u2.username as assigned_by_username
+                FROM user_roles ur
+                JOIN users u1 ON ur.user_id = u1.id
+                LEFT JOIN users u2 ON ur.assigned_by = u2.id
+                ORDER BY ur.assigned_at DESC
+                LIMIT 100
+            """
+            return self.execute_query(query, fetchall=True) or []
+    
+    def cleanup_jit_permissions(self):
+        """Clean up expired JIT permissions"""
+        query = """
+            UPDATE jit_permissions 
+            SET is_active = FALSE 
+            WHERE datetime(expires_at) <= datetime('now') AND is_active = TRUE
+        """
+        self.execute_query(query)
+        return True

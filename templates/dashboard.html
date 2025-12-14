@@ -1,51 +1,78 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Authentication System{% endblock %}
+{% block title %}Dashboard - RBAC System{% endblock %}
 
 {% block content %}
 <div class="dashboard">
-    <h2>Welcome, {{ username }}! 🎉</h2>
+    <h2>Welcome, {{ username }}!</h2>
     
-    {% if is_admin %}
-    <div class="admin-badge">
-        <span class="badge admin">Administrator</span>
-    </div>
-    {% endif %}
-    
-    <div class="user-info">
-        <h3>Your Profile Information</h3>
-        <div class="info-grid">
-            <div class="info-item">
-                <strong>Username:</strong> {{ username }}
+    <div class="user-info-card">
+        <h3>Your Role Information</h3>
+        <div class="role-display">
+            <div class="current-role">
+                <strong>Current Role:</strong>
+                <span class="role-badge {{ session.role }}">
+                    {{ role_info.name }}
+                </span>
+                <p>{{ role_info.description }}</p>
+                <small>Permission Level: {{ role_info.level }}</small>
             </div>
-            <div class="info-item">
-                <strong>Email:</strong> {{ email }}
-            </div>
-            <div class="info-item">
-                <strong>Last Login:</strong> {{ last_login }}
-            </div>
-            <div class="info-item">
-                <strong>Status:</strong> <span class="status-verified">Verified ✓</span>
+            
+            <div class="permissions-list">
+                <strong>Your Permissions:</strong>
+                <ul>
+                    {% for resource, actions in PERMISSIONS.get(session.role, {}).items() %}
+                    {% if resource != '*' %}
+                    <li>
+                        <strong>{{ RESOURCES.get(resource, resource) }}:</strong>
+                        {{ actions|join(', ') }}
+                    </li>
+                    {% endif %}
+                    {% endfor %}
+                </ul>
             </div>
         </div>
     </div>
-    
-    <div class="security-features">
-        <h3>Active Security Features</h3>
-        <ul>
-            <li>✓ Password Hashing with Salt</li>
-            <li>✓ Two-Factor Authentication (2FA)</li>
-            <li>✓ Secure Session Management</li>
-            <li>✓ HTTP-only Cookies</li>
-            <li>✓ CSRF Protection</li>
-        </ul>
+
+    {% if active_jit_permissions %}
+    <div class="jit-card">
+        <h3>Active JIT Permissions</h3>
+        <div class="jit-permissions">
+            {% for perm in active_jit_permissions %}
+            <div class="jit-item">
+                <strong>{{ RESOURCE_ROLES[perm.permission_type].name }}</strong>
+                <p>Expires: {{ perm.expires_at_formatted }}</p>
+                <small>Reason: {{ perm.reason }}</small>
+            </div>
+            {% endfor %}
+        </div>
     </div>
-    
+    {% endif %}
+
     <div class="dashboard-actions">
-        {% if is_admin %}
-        <a href="{{ url_for('db_viewer') }}" class="btn btn-info">Database Viewer</a>
-        {% endif %}
-        <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+        <div class="action-buttons">
+            <a href="{{ url_for('resources') }}" class="btn btn-info">
+                View All Resources
+            </a>
+            
+            {% if RBACSystem.can_manage_users(session.role) %}
+            <a href="{{ url_for('user_management') }}" class="btn btn-warning">
+                User Management
+            </a>
+            {% endif %}
+            
+            <a href="{{ url_for('audit_logs') }}" class="btn btn-secondary">
+                Audit Logs
+            </a>
+            
+            <a href="{{ url_for('profile') }}" class="btn">
+                My Profile
+            </a>
+        </div>
+        
+        <div class="special-access">
+            <a href="{{ url_for('request_jit_permission') }}" class="btn btn-jit">Request JIT Access</a>
+        </div>
     </div>
 </div>
 {% endblock %}

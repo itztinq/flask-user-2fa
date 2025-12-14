@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Audit Logs{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>Audit Logs</h2>
+    
+    <div class="info-card">
+        <h3>Recent Activity</h3>
+        <div class="filter-controls">
+            <form method="GET" class="filter-form">
+                <input type="text" name="search" placeholder="Search actions..." 
+                       value="{{ request.args.get('search', '') }}">
+                <select name="action_type">
+                    <option value="">All Actions</option>
+                    <option value="login" {% if request.args.get('action_type') == 'login' %}selected{% endif %}>Logins</option>
+                    <option value="assign_role" {% if request.args.get('action_type') == 'assign_role' %}selected{% endif %}>Role Assignments</option>
+                    <option value="jit_permission_request" {% if request.args.get('action_type') == 'jit_permission_request' %}selected{% endif %}>JIT Requests</option>
+                </select>
+                <button type="submit" class="btn btn-small">Filter</button>
+            </form>
+        </div>
+        
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Resource</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td>{{ log.timestamp_formatted }}</td>
+                    <td>{{ log.username or 'System' }}</td>
+                    <td>
+                        <span class="action-badge {{ log.action_type }}">
+                            {{ log.action_type|replace('_', ' ')|title }}
+                        </span>
+                    </td>
+                    <td>{{ log.resource or 'N/A' }}</td>
+                    <td>{{ log.description }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

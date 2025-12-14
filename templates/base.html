@@ -3,14 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Authentication System{% endblock %}</title>
+    <title>{% block title %}RBAC Authentication System{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Authentication System</h1>
+            <h1>RBAC Authentication System</h1>
+            <p class="subtitle">Role-Based Access Control with Just-In-Time Permissions</p>
         </header>
+
+        <nav class="main-nav">
+            <div class="nav-container">
+                {% if session.user_id %}
+                <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
+                <a href="{{ url_for('profile') }}" class="nav-link">Profile</a>
+                <a href="{{ url_for('resources') }}" class="nav-link">Resources</a>
+                
+                {% if RBACSystem.check_permission(session.role, 'audit_logs', 'read') %}
+                <a href="{{ url_for('audit_logs') }}" class="nav-link">Audit Logs</a>
+                {% endif %}
+                
+                {% if RBACSystem.can_manage_users(session.role) %}
+                <a href="{{ url_for('user_management') }}" class="nav-link admin">User Management</a>
+                {% endif %}
+                
+                {% if RBACSystem.check_permission(session.role, 'role_management', 'read') %}
+                <a href="{{ url_for('role_management') }}" class="nav-link admin">Role Management</a>
+                {% endif %}
+                
+                {% if RBACSystem.check_permission(session.role, 'database_viewer', 'read') %}
+                <a href="{{ url_for('db_viewer') }}" class="nav-link admin">DB Viewer</a>
+                {% endif %}
+                
+                <a href="{{ url_for('request_jit_permission') }}" class="nav-link jit">JIT Access</a>
+                <a href="{{ url_for('logout') }}" class="nav-link logout">Logout</a>
+                
+                <span class="nav-user">
+                    <span class="role-badge {{ session.role }}">
+                        {% if session.role in ORGANIZATIONAL_ROLES %}
+                            {{ ORGANIZATIONAL_ROLES[session.role].name }}
+                        {% else %}
+                            {{ session.role }}
+                        {% endif %}
+                    </span>
+                    {{ session.username }}
+                </span>
+                {% else %}
+                <a href="{{ url_for('login') }}" class="nav-link">Login</a>
+                <a href="{{ url_for('register') }}" class="nav-link">Register</a>
+                {% endif %}
+            </div>
+        </nav>
         
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -25,6 +69,23 @@
         <main>
             {% block content %}{% endblock %}
         </main>
+        
+        <footer>
+            <p>RBAC System v3.0 | Organizational Roles: {{ ORGANIZATIONAL_ROLES|length }} | Resource Roles: {{ RESOURCE_ROLES|length }}</p>
+        </footer>
     </div>
+    
+    <script>
+        // Auto-hide flash messages after 5 seconds
+        setTimeout(function() {
+            var flashMessages = document.querySelector('.flash-messages');
+            if (flashMessages) {
+                flashMessages.style.opacity = '0';
+                setTimeout(function() {
+                    flashMessages.remove();
+                }, 500);
+            }
+        }, 5000);
+    </script>
 </body>
 </html>

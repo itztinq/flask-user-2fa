@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}My Profile{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>My Profile</h2>
+    
+    <div class="profile-info">
+        <div class="profile-card">
+            <h3>Account Information</h3>
+            <div class="info-grid">
+                <div class="info-item">
+                    <strong>Username:</strong> {{ user.username }}
+                </div>
+                <div class="info-item">
+                    <strong>Email:</strong> {{ user.email }}
+                </div>
+                <div class="info-item">
+                    <strong>Account Created:</strong> {{ user.created_at }}
+                </div>
+                <div class="info-item">
+                    <strong>Last Login:</strong> {{ user.last_login or 'Never' }}
+                </div>
+                <div class="info-item">
+                    <strong>Status:</strong>
+                    {% if user.is_verified %}
+                    <span class="status-verified">Verified ✓</span>
+                    {% else %}
+                    <span class="status-pending">Pending</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="profile-card">
+            <h3>Current Role</h3>
+            <div class="current-role-display">
+                <span class="role-badge {{ session.role }}">{{ role_info.name }}</span>
+                <p>{{ role_info.description }}</p>
+                <small>Level: {{ role_info.level }}</small>
+            </div>
+        </div>
+    </div>
+
+    {% if role_history %}
+    <div class="info-card">
+        <h3>Role History</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <th>Assigned At</th>
+                    <th>Assigned By</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for history in role_history %}
+                <tr>
+                    <td>
+                        <span class="role-badge {{ history.role_id }}">
+                            {{ ORGANIZATIONAL_ROLES[history.role_id].name if history.role_id in ORGANIZATIONAL_ROLES else history.role_id }}
+                        </span>
+                    </td>
+                    <td>{{ history.assigned_at_formatted }}</td>
+                    <td>{{ history.assigned_by or 'System' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if jit_history %}
+    <div class="info-card">
+        <h3>JIT Permission History</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Permission</th>
+                    <th>Granted At</th>
+                    <th>Expires At</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for jit in jit_history %}
+                <tr>
+                    <td>
+                        <span class="role-badge">
+                            {{ RESOURCE_ROLES[jit.permission_type].name if jit.permission_type in RESOURCE_ROLES else jit.permission_type }}
+                        </span>
+                    </td>
+                    <td>{{ jit.granted_at_formatted }}</td>
+                    <td>{{ jit.expires_at_formatted }}</td>
+                    <td>{{ jit.reason }}</td>
+                    <td>
+                        {% if jit.is_active %}
+                        <span class="status-active">Active</span>
+                        {% else %}
+                        <span class="status-expired">Expired</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Role Management{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>Role Management System</h2>
+    
+    <div class="info-card">
+        <h3>Organizational Roles Hierarchy</h3>
+        <div class="role-hierarchy">
+            {% for role_key, role_info in ORGANIZATIONAL_ROLES.items() %}
+            {% set margin_left = ((100 - role_info.level) / 5)|int %}
+            <div class="role-item" style="margin-left: {{ margin_left }}px;">
+                <div class="role-header">
+                    <strong>{{ role_info.name }}</strong> 
+                    <span class="role-level">Level: {{ role_info.level }}</span>
+                </div>
+                <p class="role-description">{{ role_info.description }}</p>
+                <small>Permissions: {{ role_info.permissions|join(', ') }}</small>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="info-card">
+        <h3>Resource-Specific Roles (JIT)</h3>
+        <div class="resource-roles">
+            {% for role_key, role_info in RESOURCE_ROLES.items() %}
+            <div class="role-card">
+                <h4>{{ role_info.name }}</h4>
+                <p><strong>Resource:</strong> {{ role_info.resource }}</p>
+                <p>{{ role_info.description }}</p>
+                <p><strong>Permissions:</strong> {{ role_info.permissions|join(', ') }}</p>
+                <p><strong>Level:</strong> {{ role_info.level }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% if RBACSystem.can_manage_users(session.role) %}
+    <div class="info-card">
+        <h3>Assign Roles to Users</h3>
+        <form method="POST" action="{{ url_for('assign_role') }}" class="role-form">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" required 
+                       placeholder="Enter username">
+            </div>
+            
+            <div class="form-group">
+                <label for="role">Select Role:</label>
+                <select id="role" name="role" required>
+                    <option value="">-- Select Role --</option>
+                    {% for role_key, role_info in ORGANIZATIONAL_ROLES.items() %}
+                    {% if RBACSystem.can_assign_roles(session.role, role_key) %}
+                    <option value="{{ role_key }}">{{ role_info.name }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Assign Role</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

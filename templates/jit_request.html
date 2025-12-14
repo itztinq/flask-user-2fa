@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Request JIT Permission{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>Request Just-In-Time Access</h2>
+    
+    <div class="info-card">
+        <h3>Available JIT Permissions</h3>
+        <div class="jit-roles">
+            {% for role_key, role_info in RESOURCE_ROLES.items() %}
+            <div class="role-card">
+                <h4>{{ role_info.name }}</h4>
+                <p><strong>Resource:</strong> {{ role_info.resource }}</p>
+                <p>{{ role_info.description }}</p>
+                <p><strong>Permissions:</strong> {{ role_info.permissions|join(', ') }}</p>
+                
+                <form method="POST" action="{{ url_for('request_jit_permission') }}" 
+                      class="jit-form">
+                    <input type="hidden" name="permission_type" value="{{ role_key }}">
+                    
+                    <div class="form-group">
+                        <label for="duration">Duration (minutes):</label>
+                        <select name="duration" required>
+                            <option value="30">30 minutes</option>
+                            <option value="60" selected>1 hour</option>
+                            <option value="120">2 hours</option>
+                            <option value="240">4 hours</option>
+                            <option value="480">8 hours</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="reason">Reason for Access:</label>
+                        <textarea name="reason" rows="3" required 
+                                  placeholder="Explain why you need this temporary access"></textarea>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-warning">Request JIT Access</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="info-card">
+        <h3>Your Active JIT Permissions</h3>
+        {% if active_jit_permissions %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Permission Type</th>
+                    <th>Granted At</th>
+                    <th>Expires At</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for perm in active_jit_permissions %}
+                <tr>
+                    <td>{{ RESOURCE_ROLES[perm.permission_type].name }}</td>
+                    <td>{{ perm.granted_at_formatted }}</td>
+                    <td class="expiry-{{ 'soon' if perm.expires_soon else 'normal' }}">
+                        {{ perm.expires_at_formatted }}
+                    </td>
+                    <td>{{ perm.reason }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No active JIT permissions.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

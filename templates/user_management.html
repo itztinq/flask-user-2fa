@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}User Management{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>User Management</h2>
+    
+    <div class="info-card">
+        <h3>All Users</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th>JIT Permissions</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>{{ user.username }}</td>
+                    <td>{{ user.email }}</td>
+                    <td>
+                        <span class="role-badge {{ user.role }}">
+                            {{ ORGANIZATIONAL_ROLES[user.role].name if user.role in ORGANIZATIONAL_ROLES else user.role }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if user.is_verified %}
+                        <span class="status-verified">Verified</span>
+                        {% else %}
+                        <span class="status-pending">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ user.last_login or 'Never' }}</td>
+                    <td>{{ user.jit_permissions or 'None' }}</td>
+                    <td>
+                        {% if RBACSystem.can_manage_users(session.role) %}
+                        <button class="btn btn-small" onclick="showRoleModal('{{ user.username }}')">
+                            Change Role
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Role Assignment Modal -->
+<div id="roleModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <h3>Assign Role</h3>
+        <form id="roleForm" method="POST" action="{{ url_for('assign_role') }}">
+            <input type="hidden" id="modalUsername" name="username">
+            
+            <div class="form-group">
+                <label for="modalRole">Select Role:</label>
+                <select id="modalRole" name="role" required>
+                    <option value="">-- Select Role --</option>
+                    {% for role_key, role_info in roles.items() %}
+                    {% if RBACSystem.can_assign_roles(session.role, role_key) %}
+                    <option value="{{ role_key }}">{{ role_info.name }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Assign</button>
+        </form>
+    </div>
+</div>
+
+<script>
+function showRoleModal(username) {
+    document.getElementById('modalUsername').value = username;
+    document.getElementById('roleModal').style.display = 'block';
+}
+
+function closeModal() {
+    document.getElementById('roleModal').style.display = 'none';
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    var modal = document.getElementById('roleModal');
+    if (event.target == modal) {
+        modal.style.display = 'none';
+    }
+}
+</script>
+{% endblock %}

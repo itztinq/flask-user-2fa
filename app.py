@@ -8,7 +8,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from database import Database
 
 app = Flask(__name__)
-app.secret_key = 'your-very-secret-key-change-in-production-2024'
+app.secret_key = 'your-very-secret-key-change-in-production'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SECURE'] = False
 app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'
@@ -21,16 +21,165 @@ EMAIL_CONFIG = {
     'simulation_mode': True
 }
 
-# Admin configuration (AdminPass123!)
+# Admin configuration
 ADMIN_CONFIG = {
     'admin_username': 'admin',
     'admin_email': 'admin@auth-system.com'
 }
 
-# Context processor for EMAIL_CONFIG
+# Organizational Roles (Global)
+ORGANIZATIONAL_ROLES = {
+    'system_admin': {
+        'name': 'System Administrator',
+        'level': 100,
+        'description': 'Full system access including user management and role assignment',
+        'permissions': ['*']
+    },
+    'org_admin': {
+        'name': 'Organization Administrator',
+        'level': 90,
+        'description': 'Organization-level management access',
+        'permissions': ['user_management', 'role_view', 'audit_logs', 'reports']
+    },
+    'department_manager': {
+        'name': 'Department Manager',
+        'level': 80,
+        'description': 'Department-level access for team management',
+        'permissions': ['team_management', 'reports']
+    },
+    'senior_developer': {
+        'name': 'Senior Developer',
+        'level': 70,
+        'description': 'Full development access to all resources',
+        'permissions': ['database_access', 'api_access', 'deployment']
+    },
+    'developer': {
+        'name': 'Developer',
+        'level': 60,
+        'description': 'Standard development access',
+        'permissions': ['database_access', 'api_access']
+    },
+    'security_auditor': {
+        'name': 'Security Auditor',
+        'level': 50,
+        'description': 'Read-only access for security auditing',
+        'permissions': ['audit_logs', 'user_view', 'role_view']
+    },
+    'user': {
+        'name': 'Regular User',
+        'level': 10,
+        'description': 'Basic user access',
+        'permissions': ['dashboard', 'profile']
+    }
+}
+
+# Resource-Specific Roles (JIT)
+RESOURCE_ROLES = {
+    'database_admin': {
+        'name': 'Database Administrator',
+        'level': 95,
+        'description': 'Full database management access',
+        'resource': 'database',
+        'permissions': ['read', 'write', 'delete', 'manage']
+    },
+    'database_writer': {
+        'name': 'Database Writer',
+        'level': 85,
+        'description': 'Write access to databases',
+        'resource': 'database',
+        'permissions': ['read', 'write']
+    },
+    'database_reader': {
+        'name': 'Database Reader',
+        'level': 75,
+        'description': 'Read-only access to databases',
+        'resource': 'database',
+        'permissions': ['read']
+    },
+    'backup_admin': {
+        'name': 'Backup Administrator',
+        'level': 65,
+        'description': 'Backup system management',
+        'resource': 'backup',
+        'permissions': ['read', 'write', 'execute']
+    }
+}
+
+# Resource Definitions
+RESOURCES = {
+    'dashboard': 'User Dashboard',
+    'user_management': 'User Management System',
+    'role_management': 'Role Management System',
+    'database_viewer': 'Database Viewer',
+    'database_editor': 'Database Editor',
+    'audit_logs': 'Audit Logs',
+    'reports': 'Reports Generator',
+    'profile': 'User Profile',
+    'api_console': 'API Console'
+}
+
+# Permission Matrix (role -> resource -> allowed actions)
+PERMISSIONS = {
+    'system_admin': {
+        '*': ['read', 'write', 'delete', 'manage', 'grant']
+    },
+    'org_admin': {
+        'user_management': ['read', 'write'],
+        'role_management': ['read'],
+        'database_viewer': ['read'],
+        'audit_logs': ['read', 'write'],
+        'reports': ['read', 'write'],
+        'profile': ['read', 'write']
+    },
+    'department_manager': {
+        'user_management': ['read'],
+        'reports': ['read', 'write'],
+        'profile': ['read', 'write']
+    },
+    'senior_developer': {
+        'database_viewer': ['read', 'write'],
+        'database_editor': ['read', 'write'],
+        'api_console': ['read', 'write'],
+        'reports': ['read'],
+        'profile': ['read', 'write']
+    },
+    'developer': {
+        'database_viewer': ['read'],
+        'database_editor': ['read'],
+        'api_console': ['read'],
+        'reports': ['read'],
+        'profile': ['read', 'write']
+    },
+    'security_auditor': {
+        'audit_logs': ['read'],
+        'user_management': ['read'],
+        'role_management': ['read'],
+        'profile': ['read']
+    },
+    'user': {
+        'dashboard': ['read'],
+        'profile': ['read', 'write']
+    }
+}
+
+# JIT Permissions (temporary elevated access)
+JIT_PERMISSIONS = {
+    'database_admin': ['database_viewer', 'database_editor'],
+    'database_writer': ['database_viewer', 'database_editor'],
+    'database_reader': ['database_viewer'],
+    'backup_admin': ['database_viewer']
+}
+
+# Context processor
 @app.context_processor
-def inject_email_config():
-    return dict(EMAIL_CONFIG=EMAIL_CONFIG)
+def inject_config():
+    return dict(
+        EMAIL_CONFIG=EMAIL_CONFIG,
+        ORGANIZATIONAL_ROLES=ORGANIZATIONAL_ROLES,
+        RESOURCE_ROLES=RESOURCE_ROLES,
+        RESOURCES=RESOURCES,
+        JIT_PERMISSIONS=JIT_PERMISSIONS
+    )
 
 class AuthSystem:
     @staticmethod
@@ -94,6 +243,82 @@ class AuthSystem:
                 print(f"Email sending error: {e}")
                 return False
 
+class RBACSystem:
+    """Role-Based Access Control System"""
+    
+    @staticmethod
+    def check_permission(user_role, resource, action):
+        """Check if user has permission for action on resource"""
+        if user_role not in PERMISSIONS:
+            return False
+        
+        # Check if user has JIT permission for this resource
+        if RBACSystem.has_jit_permission(resource):
+            return True
+        
+        # Check specific resource permissions
+        if resource in PERMISSIONS[user_role]:
+            if action in PERMISSIONS[user_role][resource]:
+                return True
+        
+        # Check wildcard permissions
+        if '*' in PERMISSIONS[user_role]:
+            if action in PERMISSIONS[user_role]['*']:
+                return True
+        
+        return False
+    
+    @staticmethod
+    def has_jit_permission(resource):
+        """Check if current user has JIT permission for resource"""
+        if 'user_id' not in session:
+            return False
+        
+        user_id = session['user_id']
+        
+        # Check database for active JIT permissions
+        jit_permissions = db.get_active_jit_permissions(user_id)
+        
+        for perm in jit_permissions:
+            perm_type = perm['permission_type']
+            if perm_type in JIT_PERMISSIONS:
+                if resource in JIT_PERMISSIONS[perm_type]:
+                    return True
+        
+        return False
+    
+    @staticmethod
+    def can_manage_users(user_role):
+        """Check if user can manage other users"""
+        return user_role in ['system_admin', 'org_admin']
+    
+    @staticmethod
+    def can_assign_roles(user_role, target_role):
+        """Check if user can assign a specific role"""
+        if user_role not in ORGANIZATIONAL_ROLES or target_role not in ORGANIZATIONAL_ROLES:
+            return False
+        
+        # Users can only assign roles at or below their own level
+        user_level = ORGANIZATIONAL_ROLES[user_role]['level']
+        target_level = ORGANIZATIONAL_ROLES[target_role]['level']
+        
+        return user_level >= target_level and user_role != 'user'
+    
+    @staticmethod
+    def get_role_hierarchy():
+        """Get role hierarchy sorted by level"""
+        return sorted(ORGANIZATIONAL_ROLES.items(), key=lambda x: x[1]['level'], reverse=True)
+    
+    @staticmethod
+    def is_organizational_role(role):
+        """Check if role is organizational (global)"""
+        return role in ORGANIZATIONAL_ROLES
+    
+    @staticmethod
+    def is_resource_role(role):
+        """Check if role is resource-specific"""
+        return role in RESOURCE_ROLES
+
 # Create admin user on startup
 def create_admin_user():
     """Creates admin user if doesn't exist"""
@@ -106,40 +331,80 @@ def create_admin_user():
             admin_password_hash
         )
         db.activate_user(admin_id)
-        print(f"✅ Admin user created: {ADMIN_CONFIG['admin_username']} / AdminPass123!")
+        # Assign system_admin role to admin
+        db.assign_user_role(admin_id, 'system_admin', admin_id)
+        print(f"Admin user created: {ADMIN_CONFIG['admin_username']} / AdminPass123! (Role: system_admin)")
     else:
-        print(f"✅ Admin user already exists")
+        print(f"Admin user already exists")
 
-# Authentication middleware
+# Authentication middleware with RBAC
 @app.before_request
 def check_auth():
-    """Authentication middleware"""
+    """Authentication and authorization middleware"""
     public_routes = ['login', 'register', 'verify_email', 'verify_login', 'static']
     
     if request.endpoint in public_routes:
         return
     
+    # Check if user is authenticated
     session_token = request.cookies.get('session_token')
     if session_token:
         session_data = db.validate_session(session_token)
         if session_data:
             session['user_id'] = session_data['user_id']
             session['username'] = session_data['username']
-            session['is_admin'] = (session_data['username'] == ADMIN_CONFIG['admin_username'])
+            session['role'] = session_data.get('role', 'user')
+            session['is_admin'] = (session['role'] == 'system_admin')
             return
     
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
-def is_admin():
-    """Check if current user is admin"""
-    return session.get('is_admin', False)
+# Authorization decorator
+def require_permission(resource, action):
+    """Decorator to check permissions"""
+    def decorator(f):
+        def decorated_function(*args, **kwargs):
+            if 'role' not in session:
+                flash('Access denied. Please login.', 'error')
+                return redirect(url_for('login'))
+            
+            if not RBACSystem.check_permission(session['role'], resource, action):
+                flash(f'Access denied. You need {action} permission on {resource}.', 'error')
+                return redirect(url_for('dashboard'))
+            
+            return f(*args, **kwargs)
+        decorated_function.__name__ = f.__name__
+        return decorated_function
+    return decorator
 
-# Routes
+def require_role(required_role):
+    """Decorator to check for specific role"""
+    def decorator(f):
+        def decorated_function(*args, **kwargs):
+            if 'role' not in session:
+                flash('Access denied. Please login.', 'error')
+                return redirect(url_for('login'))
+            
+            if session['role'] != required_role:
+                flash(f'Access denied. {required_role} role required.', 'error')
+                return redirect(url_for('dashboard'))
+            
+            return f(*args, **kwargs)
+        decorated_function.__name__ = f.__name__
+        return decorated_function
+    return decorator
+
+# Add RBACSystem to context processor
+@app.context_processor
+def inject_rbac():
+    return dict(RBACSystem=RBACSystem)
+
 @app.route('/')
 def index():
     return redirect(url_for('login'))
 
+# Registration and Login routes
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -277,7 +542,8 @@ def verify_login():
             
             session['user_id'] = pending_user_id
             session['username'] = user['username']
-            session['is_admin'] = (user['username'] == ADMIN_CONFIG['admin_username'])
+            session['role'] = user.get('role', 'user')
+            session['is_admin'] = (user.get('role') == 'system_admin')
             session.pop('pending_login_user_id', None)
             
             response = make_response(redirect(url_for('dashboard')))
@@ -299,35 +565,53 @@ def verify_login():
     return render_template('verify_login.html')
 
 @app.route('/dashboard')
+@require_permission('dashboard', 'read')
 def dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
+    """Main dashboard with RBAC information"""
     user = db.get_user_by_id(session['user_id'])
     
-    # UPDATED: Proper datetime handling - no more timestamp conversion
-    if user['last_login']:
-        last_login = user['last_login']  # Now it's already a proper datetime string
-    else:
-        last_login = "First login"
+    # Get user's active JIT permissions
+    active_jit_permissions = db.get_active_jit_permissions(session['user_id'])
+    
+    # Get user's role information
+    role_info = ORGANIZATIONAL_ROLES.get(session['role'], ORGANIZATIONAL_ROLES['user'])
+    
+    # Get available resources based on permissions
+    available_resources = []
+    for resource, actions in PERMISSIONS.get(session['role'], {}).items():
+        if resource != '*' and 'read' in actions:
+            available_resources.append(resource)
+    
+    # Add resources from JIT permissions
+    for jit_perm in active_jit_permissions:
+        perm_type = jit_perm['permission_type']
+        if perm_type in JIT_PERMISSIONS:
+            for resource in JIT_PERMISSIONS[perm_type]:
+                if resource not in available_resources:
+                    available_resources.append(resource)
     
     return render_template('dashboard.html', 
                          username=session['username'],
                          email=user['email'],
-                         last_login=last_login,
-                         is_admin=session.get('is_admin', False))
+                         role=session['role'],
+                         role_info=role_info,
+                         active_jit_permissions=active_jit_permissions,
+                         available_resources=available_resources,
+                         last_login=user['last_login'] or "First login")
 
 @app.route('/admin/db-viewer')
+@require_permission('database_viewer', 'read')
 def db_viewer():
-    """Database viewer - ADMIN ONLY"""
-    if not session.get('is_admin', False):
-        flash('Access denied. Admin privileges required.', 'error')
-        return redirect(url_for('dashboard'))
-    
+    """Database viewer - requires database_viewer:read permission"""
     try:
+        # Check if user has either regular permission or JIT permission
+        if not RBACSystem.check_permission(session['role'], 'database_viewer', 'read') and not RBACSystem.has_jit_permission('database_viewer'):
+            flash('Access denied. You need read permission on database_viewer.', 'error')
+            return redirect(url_for('dashboard'))
+        
         # Get all users - INCLUDING PASSWORD HASHES
         users = db.execute_query("""
-            SELECT id, username, email, password_hash, is_verified,
+            SELECT id, username, email, role, password_hash, is_verified,
                    datetime(created_at) as created_at_formatted,
                    CASE 
                        WHEN last_login IS NULL THEN 'Never' 
@@ -359,7 +643,7 @@ def db_viewer():
             ORDER BY s.id DESC
         """, fetchall=True)
         
-        # Clean up expired data automatically when admin views the page
+        # Clean up expired data automatically
         db.cleanup_expired_data()
         
         return render_template('db_viewer.html', 
@@ -370,6 +654,386 @@ def db_viewer():
     except Exception as e:
         flash(f'Error accessing database: {str(e)}', 'error')
         return redirect(url_for('dashboard'))
+
+@app.route('/admin/user-management')
+@require_permission('user_management', 'read')
+def user_management():
+    """User management page - requires user_management:read permission"""
+    users = db.get_all_users_with_roles()
+    
+    return render_template('user_management.html', 
+                         users=users or [],
+                         roles=ORGANIZATIONAL_ROLES)
+
+@app.route('/admin/assign-role', methods=['POST'])
+@require_permission('user_management', 'write')
+def assign_role():
+    """Assign role to user - requires user_management:write permission"""
+    username = request.form.get('username')
+    role = request.form.get('role')
+    
+    if not username or not role:
+        flash('Username and role are required', 'error')
+        return redirect(url_for('user_management'))
+    
+    if role not in ORGANIZATIONAL_ROLES:
+        flash('Invalid role', 'error')
+        return redirect(url_for('user_management'))
+    
+    user = db.get_user_by_username(username)
+    if not user:
+        flash('User not found', 'error')
+        return redirect(url_for('user_management'))
+    
+    # Check if current user can assign this role
+    if not RBACSystem.can_assign_roles(session['role'], role):
+        flash(f'You cannot assign the {role} role. You can only assign roles at or below your level.', 'error')
+        return redirect(url_for('user_management'))
+    
+    db.assign_user_role(user['id'], role, session['user_id'])
+    
+    # Log the action
+    db.log_action(
+        session['user_id'],
+        'assign_role',
+        f"Assigned role '{role}' to user '{username}'",
+        'user_management'
+    )
+    
+    flash(f'Role {ORGANIZATIONAL_ROLES[role]["name"]} assigned to {username}', 'success')
+    return redirect(url_for('user_management'))
+
+@app.route('/jit/request-permission', methods=['GET', 'POST'])
+@require_permission('dashboard', 'read')
+def request_jit_permission():
+    """Request JIT permission page"""
+    if request.method == 'POST':
+        permission_type = request.form.get('permission_type')
+        duration = int(request.form.get('duration', 60))
+        reason = request.form.get('reason', 'Temporary access needed')
+        
+        if not permission_type:
+            flash('Permission type is required', 'error')
+            return redirect(url_for('request_jit_permission'))
+        
+        # Validate permission type
+        if permission_type not in RESOURCE_ROLES:
+            flash('Invalid permission type', 'error')
+            return redirect(url_for('request_jit_permission'))
+        
+        # Check if user already has this JIT permission
+        if db.has_jit_permission(session['user_id'], permission_type):
+            flash(f'You already have active {permission_type} permission', 'warning')
+            return redirect(url_for('dashboard'))
+        
+        # Request JIT permission
+        success = db.request_jit_permission(
+            session['user_id'],
+            permission_type,
+            duration,
+            session['user_id'],
+            reason
+        )
+        
+        if success:
+            flash(f'JIT permission "{RESOURCE_ROLES[permission_type]["name"]}" granted for {duration} minutes', 'success')
+            
+            # Log the action
+            db.log_action(
+                session['user_id'],
+                'jit_permission_request',
+                f"Requested JIT permission '{permission_type}' for {duration} minutes: {reason}",
+                'jit_system'
+            )
+        else:
+            flash('Failed to request JIT permission', 'error')
+        
+        return redirect(url_for('dashboard'))
+    
+    # GET request - show available JIT permissions
+    active_permissions = db.get_active_jit_permissions(session['user_id'])
+    
+    return render_template('jit_request.html',
+                         active_jit_permissions=active_permissions)
+
+@app.route('/admin/audit/logs')
+@require_permission('audit_logs', 'read')
+def audit_logs():
+    """View audit logs - requires audit_logs:read permission"""
+    search = request.args.get('search', '')
+    action_type = request.args.get('action_type', '')
+    
+    query = """
+        SELECT al.*, u.username,
+               datetime(al.timestamp) as timestamp_formatted
+        FROM audit_logs al
+        LEFT JOIN users u ON al.user_id = u.id
+        WHERE 1=1
+    """
+    params = []
+    
+    if search:
+        query += " AND (al.description LIKE ? OR al.resource LIKE ?)"
+        params.extend([f'%{search}%', f'%{search}%'])
+    
+    if action_type:
+        query += " AND al.action_type = ?"
+        params.append(action_type)
+    
+    query += " ORDER BY al.timestamp DESC LIMIT 100"
+    
+    logs = db.execute_query(query, params, fetchall=True) or []
+    
+    return render_template('audit_logs.html', logs=logs)
+
+@app.route('/profile')
+@require_permission('profile', 'read')
+def profile():
+    """User profile page"""
+    user = db.get_user_by_id(session['user_id'])
+    
+    # Get user's role assignments history
+    role_history = db.execute_query("""
+        SELECT ur.role_id, ur.assigned_at, u2.username as assigned_by,
+               datetime(ur.assigned_at) as assigned_at_formatted
+        FROM user_roles ur
+        LEFT JOIN users u2 ON ur.assigned_by = u2.id
+        WHERE ur.user_id = ?
+        ORDER BY ur.assigned_at DESC
+    """, (session['user_id'],), fetchall=True) or []
+    
+    # Get JIT permission history
+    jit_history = db.execute_query("""
+        SELECT permission_type, granted_at, expires_at, reason, is_active,
+               datetime(granted_at) as granted_at_formatted,
+               datetime(expires_at) as expires_at_formatted
+        FROM jit_permissions
+        WHERE user_id = ?
+        ORDER BY granted_at DESC
+        LIMIT 20
+    """, (session['user_id'],), fetchall=True) or []
+    
+    return render_template('profile.html',
+                         user=user,
+                         role_history=role_history,
+                         jit_history=jit_history,
+                         role_info=ORGANIZATIONAL_ROLES.get(session['role'], {}))
+
+@app.route('/resources')
+@require_permission('dashboard', 'read')
+def resources():
+    """List all resources user can access"""
+    user_role = session['role']
+    available_resources = []
+    
+    # Get regular permissions
+    for resource, actions in PERMISSIONS.get(user_role, {}).items():
+        if resource != '*' and 'read' in actions:
+            available_resources.append({
+                'name': resource,
+                'title': RESOURCES.get(resource, resource.replace('_', ' ').title()),
+                'description': RESOURCES.get(resource, 'No description available'),
+                'access_type': 'Regular Role Permission',
+                'actions': actions,
+                'role': user_role
+            })
+    
+    # Get JIT permissions
+    jit_permissions = db.get_active_jit_permissions(session['user_id'])
+    for jit_perm in jit_permissions:
+        perm_type = jit_perm['permission_type']
+        if perm_type in JIT_PERMISSIONS:
+            for resource in JIT_PERMISSIONS[perm_type]:
+                # Check if already added
+                if not any(r['name'] == resource for r in available_resources):
+                    available_resources.append({
+                        'name': resource,
+                        'title': RESOURCES.get(resource, resource.replace('_', ' ').title()),
+                        'description': RESOURCES.get(resource, 'No description available'),
+                        'access_type': f'JIT: {RESOURCE_ROLES[perm_type]["name"]}',
+                        'actions': RESOURCE_ROLES[perm_type]['permissions'],
+                        'expires_at': jit_perm['expires_at'],
+                        'role': perm_type
+                    })
+    
+    return render_template('resources.html',
+                         resources=available_resources,
+                         user_role=user_role)
+
+@app.route('/admin/role-management')
+@require_permission('role_management', 'read')
+def role_management():
+    """Role management page - shows all roles and hierarchy"""
+    role_hierarchy = RBACSystem.get_role_hierarchy()
+    
+    return render_template('role_management.html',
+                         role_hierarchy=role_hierarchy)
+
+@app.route('/admin/update-user', methods=['POST'])
+@require_permission('database_viewer', 'write')
+def update_user():
+    """Update user information"""
+    user_id = request.form.get('user_id')
+    username = request.form.get('username')
+    email = request.form.get('email')
+    role = request.form.get('role')
+    verified = request.form.get('verified') == '1'
+    password = request.form.get('password')
+    
+    try:
+        # Update basic info
+        db.execute_query(
+            "UPDATE users SET username = ?, email = ?, role = ?, is_verified = ? WHERE id = ?",
+            (username, email, role, verified, user_id)
+        )
+        
+        # Update password if provided
+        if password:
+            password_hash = generate_password_hash(password)
+            db.execute_query(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (password_hash, user_id)
+            )
+        
+        db.log_action(
+            session['user_id'],
+            'update_user',
+            f"Updated user {username} (ID: {user_id})",
+            'database_viewer'
+        )
+        
+        flash(f'User {username} updated successfully', 'success')
+        return redirect(url_for('db_viewer'))
+    except Exception as e:
+        flash(f'Error updating user: {str(e)}', 'error')
+        return redirect(url_for('db_viewer'))
+
+@app.route('/admin/create-user', methods=['POST'])
+@require_permission('database_viewer', 'write')
+def create_user():
+    """Create new user"""
+    username = request.form.get('username')
+    email = request.form.get('email')
+    role = request.form.get('role')
+    verified = request.form.get('verified') == '1'
+    password = request.form.get('password', 'DefaultPass123!')
+    
+    try:
+        # Check if user exists
+        if db.user_exists(username, email):
+            flash('Username or email already exists', 'error')
+            return redirect(url_for('db_viewer'))
+        
+        # Create user
+        password_hash = generate_password_hash(password)
+        db.execute_query(
+            "INSERT INTO users (username, email, password_hash, role, is_verified) VALUES (?, ?, ?, ?, ?)",
+            (username, email, password_hash, role, verified)
+        )
+        
+        db.log_action(
+            session['user_id'],
+            'create_user',
+            f"Created new user {username} with role {role}",
+            'database_viewer'
+        )
+        
+        flash(f'User {username} created successfully', 'success')
+        return redirect(url_for('db_viewer'))
+    except Exception as e:
+        flash(f'Error creating user: {str(e)}', 'error')
+        return redirect(url_for('db_viewer'))
+
+@app.route('/admin/delete-user/<int:user_id>', methods=['POST'])
+@require_permission('database_viewer', 'write')
+def delete_user(user_id):
+    """Delete a user"""
+    if user_id == session['user_id']:
+        flash('Cannot delete your own account', 'error')
+        return redirect(url_for('db_viewer'))
+    
+    try:
+        user = db.get_user_by_id(user_id)
+        if user:
+            # Delete user and related data
+            db.execute_query("DELETE FROM users WHERE id = ?", (user_id,))
+            db.execute_query("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            db.execute_query("DELETE FROM verification_codes WHERE user_id = ?", (user_id,))
+            db.execute_query("DELETE FROM jit_permissions WHERE user_id = ?", (user_id,))
+            db.execute_query("DELETE FROM user_roles WHERE user_id = ?", (user_id,))
+            
+            db.log_action(
+                session['user_id'],
+                'delete_user',
+                f"Deleted user {user['username']} (ID: {user_id})",
+                'database_viewer'
+            )
+            
+            flash(f'User {user["username"]} deleted successfully', 'success')
+    except Exception as e:
+        flash(f'Error deleting user: {str(e)}', 'error')
+    
+    return redirect(url_for('db_viewer'))
+
+@app.route('/admin/delete-session/<int:session_id>', methods=['POST'])
+@require_permission('database_viewer', 'write')
+def delete_session_route(session_id):
+    """Delete a session"""
+    try:
+        db.execute_query("DELETE FROM sessions WHERE id = ?", (session_id,))
+        
+        db.log_action(
+            session['user_id'],
+            'delete_session',
+            f"Deleted session {session_id}",
+            'database_viewer'
+        )
+        
+        flash('Session revoked successfully', 'success')
+    except Exception as e:
+        flash(f'Error deleting session: {str(e)}', 'error')
+    
+    return redirect(url_for('db_viewer'))
+
+@app.route('/admin/clear-sessions', methods=['POST'])
+@require_permission('database_viewer', 'write')
+def clear_sessions():
+    """Clear all sessions"""
+    try:
+        db.execute_query("DELETE FROM sessions WHERE user_id != ?", (session['user_id'],))
+        
+        db.log_action(
+            session['user_id'],
+            'clear_sessions',
+            "Cleared all user sessions",
+            'database_viewer'
+        )
+        
+        flash('All sessions cleared successfully', 'success')
+    except Exception as e:
+        flash(f'Error clearing sessions: {str(e)}', 'error')
+    
+    return redirect(url_for('db_viewer'))
+
+@app.route('/admin/cleanup', methods=['POST'])
+@require_permission('database_viewer', 'write')
+def cleanup_database():
+    """Clean up expired data"""
+    try:
+        db.cleanup_expired_data()
+        
+        db.log_action(
+            session['user_id'],
+            'database_cleanup',
+            "Performed database cleanup",
+            'database_viewer'
+        )
+        
+        flash('Database cleanup completed successfully', 'success')
+    except Exception as e:
+        flash(f'Error during cleanup: {str(e)}', 'error')
+    
+    return redirect(url_for('db_viewer'))
 
 @app.route('/logout')
 def logout():
