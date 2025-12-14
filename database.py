@@ -65,17 +65,18 @@ class Database:
             )
         ''')
         
-        # Just-In-Time permissions table
+        # Just-In-Time permissions table - UPDATED SCHEMA
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS jit_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 permission_type TEXT NOT NULL,
                 granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                expires_at DATETIME NOT NULL,
+                expires_at DATETIME,
                 granted_by INTEGER,
-                is_active BOOLEAN DEFAULT TRUE,
+                status TEXT DEFAULT 'pending',
                 reason TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
                 FOREIGN KEY (user_id) REFERENCES users (id),
                 FOREIGN KEY (granted_by) REFERENCES users (id)
             )
@@ -107,12 +108,33 @@ class Database:
             )
         ''')
         
-        # Create indexes for better performance
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_jit_permissions_expires ON jit_permissions(expires_at)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_jit_permissions_user ON jit_permissions(user_id, is_active)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)')
+        conn.commit()  # Commit table creation first
+        
+        # Now create indexes - after tables are committed
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)')
+        except:
+            print("Note: idx_users_role index already exists or couldn't be created")
+            
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_jit_permissions_expires ON jit_permissions(expires_at)')
+        except:
+            print("Note: idx_jit_permissions_expires index already exists or couldn't be created")
+            
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_jit_permissions_user ON jit_permissions(user_id, is_active)')
+        except:
+            print("Note: idx_jit_permissions_user index already exists or couldn't be created")
+            
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)')
+        except:
+            print("Note: idx_audit_logs_user index already exists or couldn't be created")
+            
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)')
+        except:
+            print("Note: idx_audit_logs_timestamp index already exists or couldn't be created")
         
         conn.commit()
         conn.close()
@@ -275,9 +297,9 @@ class Database:
                 "DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now')"
             )
             
-            # Deactivate expired JIT permissions
+            # Update expired JIT permissions
             self.execute_query(
-                "UPDATE jit_permissions SET is_active = FALSE WHERE datetime(expires_at) <= datetime('now')"
+                "UPDATE jit_permissions SET is_active = FALSE, status = 'expired' WHERE datetime(expires_at) <= datetime('now') AND is_active = TRUE"
             )
             
             print("Expired data cleaned up successfully")
@@ -312,29 +334,77 @@ class Database:
         result = self.execute_query(query, (user_id,), fetchone=True)
         return result['role'] if result else 'user'
     
-    def request_jit_permission(self, user_id, permission_type, duration_minutes, granted_by=None, reason=None):
-        """Requests JIT permission"""
+    def request_jit_permission(self, user_id, permission_type, duration_minutes, reason=None):
+        """Requests JIT permission (needs admin approval)"""
         try:
-            expires_at = datetime.now() + timedelta(minutes=duration_minutes)
-            
             query = """
-                INSERT INTO jit_permissions (user_id, permission_type, granted_at, expires_at, granted_by, is_active, reason)
-                VALUES (?, ?, datetime('now'), ?, ?, TRUE, ?)
+                INSERT INTO jit_permissions (user_id, permission_type, status, reason)
+                VALUES (?, ?, 'pending', ?)
             """
-            self.execute_query(query, (user_id, permission_type, expires_at.strftime('%Y-%m-%d %H:%M:%S'), granted_by, reason))
+            self.execute_query(query, (user_id, permission_type, reason))
             return True
         except Exception as e:
             print(f"Error requesting JIT permission: {e}")
             return False
     
-    def get_active_jit_permissions(self, user_id):
-        """Gets active JIT permissions for a user"""
+    def approve_jit_permission(self, permission_id, granted_by, duration_minutes):
+        """Approve JIT permission"""
+        try:
+            expires_at = datetime.now() + timedelta(minutes=duration_minutes)
+            
+            query = """
+                UPDATE jit_permissions 
+                SET status = 'approved', 
+                    granted_by = ?,
+                    granted_at = datetime('now'),
+                    expires_at = ?,
+                    is_active = TRUE
+                WHERE id = ? AND status = 'pending'
+            """
+            self.execute_query(query, (granted_by, expires_at.strftime('%Y-%m-%d %H:%M:%S'), permission_id))
+            return True
+        except Exception as e:
+            print(f"Error approving JIT permission: {e}")
+            return False
+    
+    def deny_jit_permission(self, permission_id, denied_by):
+        """Deny JIT permission"""
+        try:
+            query = """
+                UPDATE jit_permissions 
+                SET status = 'denied',
+                    granted_by = ?,
+                    is_active = FALSE
+                WHERE id = ? AND status = 'pending'
+            """
+            self.execute_query(query, (denied_by, permission_id))
+            return True
+        except Exception as e:
+            print(f"Error denying JIT permission: {e}")
+            return False
+    
+    def get_pending_jit_requests(self):
+        """Get all pending JIT requests"""
         query = """
-            SELECT permission_type, granted_at, expires_at, reason,
+            SELECT jp.*, u.username as requester_username,
+                   datetime(jp.granted_at) as requested_at_formatted
+            FROM jit_permissions jp
+            JOIN users u ON jp.user_id = u.id
+            WHERE jp.status = 'pending'
+            ORDER BY jp.granted_at DESC
+        """
+        return self.execute_query(query, fetchall=True) or []
+    
+    def get_active_jit_permissions(self, user_id):
+        """Gets active (approved and not expired) JIT permissions for a user"""
+        query = """
+            SELECT permission_type, granted_at, expires_at, reason, status,
                    datetime(granted_at) as granted_at_formatted,
                    datetime(expires_at) as expires_at_formatted
             FROM jit_permissions 
-            WHERE user_id = ? AND is_active = TRUE AND datetime(expires_at) > datetime('now')
+            WHERE user_id = ? AND status = 'approved' 
+            AND is_active = TRUE
+            AND datetime(expires_at) > datetime('now')
             ORDER BY granted_at DESC
         """
         return self.execute_query(query, (user_id,), fetchall=True) or []
@@ -343,8 +413,8 @@ class Database:
         """Checks if user has active JIT permission"""
         query = """
             SELECT id FROM jit_permissions 
-            WHERE user_id = ? AND permission_type = ? AND is_active = TRUE 
-            AND datetime(expires_at) > datetime('now')
+            WHERE user_id = ? AND permission_type = ? AND status = 'approved' 
+            AND is_active = TRUE AND datetime(expires_at) > datetime('now')
         """
         result = self.execute_query(query, (user_id, permission_type), fetchone=True)
         return result is not None
@@ -370,7 +440,7 @@ class Database:
                    datetime(u.last_login) as last_login,
                    GROUP_CONCAT(DISTINCT jp.permission_type) as jit_permissions
             FROM users u
-            LEFT JOIN jit_permissions jp ON u.id = jp.user_id AND jp.is_active = TRUE AND datetime(jp.expires_at) > datetime('now')
+            LEFT JOIN jit_permissions jp ON u.id = jp.user_id AND jp.status = 'approved' AND jp.is_active = TRUE AND datetime(jp.expires_at) > datetime('now')
             GROUP BY u.id
             ORDER BY u.id DESC
         """
@@ -387,52 +457,3 @@ class Database:
             LIMIT ?
         """
         return self.execute_query(query, (limit,), fetchall=True) or []
-    
-    def get_all_users_with_details(self):
-        """Get all users with detailed information"""
-        query = """
-            SELECT u.*,
-                   GROUP_CONCAT(DISTINCT jp.permission_type) as active_jit_permissions,
-                   GROUP_CONCAT(DISTINCT ur.role_id) as role_history
-            FROM users u
-            LEFT JOIN jit_permissions jp ON u.id = jp.user_id 
-                AND jp.is_active = TRUE 
-                AND datetime(jp.expires_at) > datetime('now')
-            LEFT JOIN user_roles ur ON u.id = ur.user_id
-            GROUP BY u.id
-            ORDER BY u.id DESC
-        """
-        return self.execute_query(query, fetchall=True) or []
-    
-    def get_role_assignments(self, user_id=None):
-        """Get role assignments"""
-        if user_id:
-            query = """
-                SELECT ur.*, u1.username as user_username, u2.username as assigned_by_username
-                FROM user_roles ur
-                JOIN users u1 ON ur.user_id = u1.id
-                LEFT JOIN users u2 ON ur.assigned_by = u2.id
-                WHERE ur.user_id = ?
-                ORDER BY ur.assigned_at DESC
-            """
-            return self.execute_query(query, (user_id,), fetchall=True) or []
-        else:
-            query = """
-                SELECT ur.*, u1.username as user_username, u2.username as assigned_by_username
-                FROM user_roles ur
-                JOIN users u1 ON ur.user_id = u1.id
-                LEFT JOIN users u2 ON ur.assigned_by = u2.id
-                ORDER BY ur.assigned_at DESC
-                LIMIT 100
-            """
-            return self.execute_query(query, fetchall=True) or []
-    
-    def cleanup_jit_permissions(self):
-        """Clean up expired JIT permissions"""
-        query = """
-            UPDATE jit_permissions 
-            SET is_active = FALSE 
-            WHERE datetime(expires_at) <= datetime('now') AND is_active = TRUE
-        """
-        self.execute_query(query)
-        return True

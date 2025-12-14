@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}JIT Requests{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>Pending JIT Requests</h2>
+    
+    <div class="info-card">
+        <h3>Requests Awaiting Approval</h3>
+        
+        {% if pending_requests %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Requester</th>
+                    <th>Permission Type</th>
+                    <th>Reason</th>
+                    <th>Requested At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for request in pending_requests %}
+                <tr>
+                    <td>{{ request.id }}</td>
+                    <td>{{ request.requester_username }}</td>
+                    <td>
+                        <span class="role-badge {{ request.permission_type }}">
+                            {{ RESOURCE_ROLES[request.permission_type].name }}
+                        </span>
+                    </td>
+                    <td>{{ request.reason or 'No reason provided' }}</td>
+                    <td>{{ request.requested_at_formatted }}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <form method="POST" action="{{ url_for('approve_jit_request', permission_id=request.id) }}" style="display: inline;">
+                                <select name="duration" style="margin-right: 5px;">
+                                    <option value="30">30 min</option>
+                                    <option value="60" selected>1 hour</option>
+                                    <option value="120">2 hours</option>
+                                    <option value="240">4 hours</option>
+                                    <option value="480">8 hours</option>
+                                </select>
+                                <button type="submit" class="btn btn-small btn-success">Approve</button>
+                            </form>
+                            <form method="POST" action="{{ url_for('deny_jit_request', permission_id=request.id) }}" style="display: inline;">
+                                <button type="submit" class="btn btn-small btn-danger">Deny</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No pending JIT requests.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -36,7 +36,11 @@
                 <a href="{{ url_for('db_viewer') }}" class="nav-link admin">DB Viewer</a>
                 {% endif %}
                 
-                <a href="{{ url_for('request_jit_permission') }}" class="nav-link jit">JIT Access</a>
+                {% if RBACSystem.can_manage_users(session.role) %}
+                <a href="{{ url_for('jit_requests') }}" class="nav-link admin">JIT Requests</a>
+                {% endif %}
+                
+                <a href="{{ url_for('request_jit_permission') }}" class="nav-link jit">Request JIT</a>
                 <a href="{{ url_for('logout') }}" class="nav-link logout">Logout</a>
                 
                 <span class="nav-user">

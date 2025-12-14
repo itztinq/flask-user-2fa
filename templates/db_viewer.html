@@ -38,7 +38,7 @@
             </thead>
             <tbody>
                 {% for user in users %}
-                <tr>
+                <tr data-user-id="{{ user.id }}">
                     <td>{{ user.id }}</td>
                     <td>
                         <strong>{{ user.username }}</strong>
@@ -63,8 +63,11 @@
                     <td>{{ user.last_login_formatted }}</td>
                     {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
                     <td>
+                        {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
                         <button class="btn btn-small" onclick="editUser('{{ user.id }}')">Edit</button>
-                        {% if user.id != session.user_id %}
+                        {% endif %}
+                        
+                        {% if RBACSystem.can_delete_user(session.role, user.role, session.user_id, user.id) %}
                         <button class="btn btn-small btn-danger" onclick="deleteUser('{{ user.id }}', '{{ user.username }}')">Delete</button>
                         {% endif %}
                     </td>
@@ -80,7 +83,7 @@
         <h3>Active Sessions</h3>
         <div class="table-controls">
             <span>Active Sessions: {{ sessions|length }}</span>
-            {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+            {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') and RBACSystem.can_manage_users(session.role) %}
             <button class="btn btn-small btn-danger" onclick="clearAllSessions()">Clear All</button>
             {% endif %}
         </div>
@@ -93,7 +96,7 @@
                     <th>Token Preview</th>
                     <th>Created</th>
                     <th>Expires</th>
-                    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+                    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') and RBACSystem.can_manage_users(session.role) %}
                     <th>Actions</th>
                     {% endif %}
                 </tr>
@@ -108,9 +111,11 @@
                     </td>
                     <td>{{ session_data.created_at_formatted }}</td>
                     <td>{{ session_data.expires_at_formatted }}</td>
-                    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+                    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') and RBACSystem.can_manage_users(session.role) %}
                     <td>
+                        {% if session_data.username != session.username %}
                         <button class="btn btn-small btn-danger" onclick="deleteSession('{{ session_data.id }}')">Revoke</button>
+                        {% endif %}
                     </td>
                     {% endif %}
                 </tr>
@@ -166,8 +171,53 @@
         </table>
     </div>
 
+    <!-- JIT Permissions -->
+    <div class="table-section">
+        <h3>Active JIT Permissions</h3>
+        {% if active_jit_permissions %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Permission Type</th>
+                    <th>Status</th>
+                    <th>Granted At</th>
+                    <th>Expires At</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for perm in active_jit_permissions %}
+                <tr>
+                    <td>{{ perm.username or 'Unknown' }}</td>
+                    <td>
+                        <span class="role-badge {{ perm.permission_type }}">
+                            {{ RESOURCE_ROLES[perm.permission_type].name if perm.permission_type in RESOURCE_ROLES else perm.permission_type }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if perm.status == 'approved' %}
+                        <span class="status-verified">Active</span>
+                        {% elif perm.status == 'pending' %}
+                        <span class="status-pending">Pending</span>
+                        {% else %}
+                        <span>{{ perm.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ perm.granted_at_formatted }}</td>
+                    <td>{{ perm.expires_at_formatted }}</td>
+                    <td>{{ perm.reason or 'No reason provided' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No active JIT permissions.</p>
+        {% endif %}
+    </div>
+
     <!-- Database Actions -->
-    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') %}
+    {% if RBACSystem.check_permission(session.role, 'database_viewer', 'write') and RBACSystem.can_manage_users(session.role) %}
     <div class="info-card">
         <h3>Database Actions</h3>
         <div class="action-buttons">
@@ -277,8 +327,7 @@ document.getElementById('userForm').addEventListener('submit', async function(e)
             alert('User saved successfully');
             window.location.reload();
         } else {
-            const error = await response.text();
-            alert('Error saving user: ' + error);
+            alert('Error saving user');
         }
     } catch (error) {
         alert('Error: ' + error.message);

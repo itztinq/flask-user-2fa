@@ -129,32 +129,37 @@ PERMISSIONS = {
         'database_viewer': ['read'],
         'audit_logs': ['read', 'write'],
         'reports': ['read', 'write'],
-        'profile': ['read', 'write']
+        'profile': ['read', 'write'],
+        'dashboard': ['read']
     },
     'department_manager': {
         'user_management': ['read'],
         'reports': ['read', 'write'],
-        'profile': ['read', 'write']
+        'profile': ['read', 'write'],
+        'dashboard': ['read']
     },
     'senior_developer': {
         'database_viewer': ['read', 'write'],
         'database_editor': ['read', 'write'],
         'api_console': ['read', 'write'],
         'reports': ['read'],
-        'profile': ['read', 'write']
+        'profile': ['read', 'write'],
+        'dashboard': ['read']
     },
     'developer': {
         'database_viewer': ['read'],
         'database_editor': ['read'],
         'api_console': ['read'],
         'reports': ['read'],
-        'profile': ['read', 'write']
+        'profile': ['read', 'write'],
+        'dashboard': ['read']
     },
     'security_auditor': {
         'audit_logs': ['read'],
         'user_management': ['read'],
         'role_management': ['read'],
-        'profile': ['read']
+        'profile': ['read'],
+        'dashboard': ['read']
     },
     'user': {
         'dashboard': ['read'],
@@ -178,7 +183,8 @@ def inject_config():
         ORGANIZATIONAL_ROLES=ORGANIZATIONAL_ROLES,
         RESOURCE_ROLES=RESOURCE_ROLES,
         RESOURCES=RESOURCES,
-        JIT_PERMISSIONS=JIT_PERMISSIONS
+        JIT_PERMISSIONS=JIT_PERMISSIONS,
+        PERMISSIONS=PERMISSIONS
     )
 
 class AuthSystem:
@@ -252,8 +258,8 @@ class RBACSystem:
         if user_role not in PERMISSIONS:
             return False
         
-        # Check if user has JIT permission for this resource
-        if RBACSystem.has_jit_permission(resource):
+        # Check if user has JIT permission for this resource and action
+        if RBACSystem.has_jit_permission(resource, action):
             return True
         
         # Check specific resource permissions
@@ -269,8 +275,8 @@ class RBACSystem:
         return False
     
     @staticmethod
-    def has_jit_permission(resource):
-        """Check if current user has JIT permission for resource"""
+    def has_jit_permission(resource, action=None):
+        """Check if current user has JIT permission for resource and action"""
         if 'user_id' not in session:
             return False
         
@@ -283,7 +289,15 @@ class RBACSystem:
             perm_type = perm['permission_type']
             if perm_type in JIT_PERMISSIONS:
                 if resource in JIT_PERMISSIONS[perm_type]:
-                    return True
+                    # Check if the action is allowed by this JIT permission
+                    if action:
+                        # Get the permissions for this resource role
+                        if perm_type in RESOURCE_ROLES:
+                            resource_permissions = RESOURCE_ROLES[perm_type]['permissions']
+                            if action in resource_permissions:
+                                return True
+                    else:
+                        return True
         
         return False
     
@@ -305,19 +319,23 @@ class RBACSystem:
         return user_level >= target_level and user_role != 'user'
     
     @staticmethod
+    def can_delete_user(current_user_role, target_user_role, current_user_id, target_user_id):
+        """Check if user can delete another user"""
+        # Users cannot delete themselves
+        if current_user_id == target_user_id:
+            return False
+        
+        # Only system_admin can delete other admins
+        if target_user_role in ['system_admin', 'org_admin']:
+            return current_user_role == 'system_admin'
+        
+        # Check if user has permission to manage users
+        return RBACSystem.can_manage_users(current_user_role)
+    
+    @staticmethod
     def get_role_hierarchy():
         """Get role hierarchy sorted by level"""
         return sorted(ORGANIZATIONAL_ROLES.items(), key=lambda x: x[1]['level'], reverse=True)
-    
-    @staticmethod
-    def is_organizational_role(role):
-        """Check if role is organizational (global)"""
-        return role in ORGANIZATIONAL_ROLES
-    
-    @staticmethod
-    def is_resource_role(role):
-        """Check if role is resource-specific"""
-        return role in RESOURCE_ROLES
 
 # Create admin user on startup
 def create_admin_user():
@@ -521,6 +539,10 @@ def login():
 
 @app.route('/verify-login', methods=['GET', 'POST'])
 def verify_login():
+    # If user is already logged in, redirect to dashboard
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    
     pending_user_id = session.get('pending_login_user_id')
     
     if not pending_user_id:
@@ -540,11 +562,14 @@ def verify_login():
             
             user = db.get_user_by_id(pending_user_id)
             
+            # Clear pending login session
+            session.pop('pending_login_user_id', None)
+            
+            # Set user session
             session['user_id'] = pending_user_id
             session['username'] = user['username']
             session['role'] = user.get('role', 'user')
             session['is_admin'] = (user.get('role') == 'system_admin')
-            session.pop('pending_login_user_id', None)
             
             response = make_response(redirect(url_for('dashboard')))
             response.set_cookie(
@@ -605,11 +630,11 @@ def db_viewer():
     """Database viewer - requires database_viewer:read permission"""
     try:
         # Check if user has either regular permission or JIT permission
-        if not RBACSystem.check_permission(session['role'], 'database_viewer', 'read') and not RBACSystem.has_jit_permission('database_viewer'):
+        if not RBACSystem.check_permission(session['role'], 'database_viewer', 'read') and not RBACSystem.has_jit_permission('database_viewer', 'read'):
             flash('Access denied. You need read permission on database_viewer.', 'error')
             return redirect(url_for('dashboard'))
         
-        # Get all users - INCLUDING PASSWORD HASHES
+        # Get all users
         users = db.execute_query("""
             SELECT id, username, email, role, password_hash, is_verified,
                    datetime(created_at) as created_at_formatted,
@@ -643,13 +668,26 @@ def db_viewer():
             ORDER BY s.id DESC
         """, fetchall=True)
         
+        # Get active JIT permissions
+        active_jit_permissions = db.execute_query("""
+            SELECT jp.*, u.username,
+                   datetime(jp.granted_at) as granted_at_formatted,
+                   datetime(jp.expires_at) as expires_at_formatted
+            FROM jit_permissions jp
+            LEFT JOIN users u ON jp.user_id = u.id
+            WHERE jp.status = 'approved' 
+            AND datetime(jp.expires_at) > datetime('now')
+            ORDER BY jp.expires_at DESC
+        """, fetchall=True) or []
+        
         # Clean up expired data automatically
         db.cleanup_expired_data()
         
         return render_template('db_viewer.html', 
                              users=users or [],
                              verification_codes=verification_codes or [], 
-                             sessions=sessions or [])
+                             sessions=sessions or [],
+                             active_jit_permissions=active_jit_permissions)
     
     except Exception as e:
         flash(f'Error accessing database: {str(e)}', 'error')
@@ -721,22 +759,16 @@ def request_jit_permission():
             flash('Invalid permission type', 'error')
             return redirect(url_for('request_jit_permission'))
         
-        # Check if user already has this JIT permission
-        if db.has_jit_permission(session['user_id'], permission_type):
-            flash(f'You already have active {permission_type} permission', 'warning')
-            return redirect(url_for('dashboard'))
-        
-        # Request JIT permission
+        # Request JIT permission (needs admin approval)
         success = db.request_jit_permission(
             session['user_id'],
             permission_type,
             duration,
-            session['user_id'],
             reason
         )
         
         if success:
-            flash(f'JIT permission "{RESOURCE_ROLES[permission_type]["name"]}" granted for {duration} minutes', 'success')
+            flash(f'JIT permission "{RESOURCE_ROLES[permission_type]["name"]}" requested. Awaiting admin approval.', 'success')
             
             # Log the action
             db.log_action(
@@ -751,10 +783,91 @@ def request_jit_permission():
         return redirect(url_for('dashboard'))
     
     # GET request - show available JIT permissions
-    active_permissions = db.get_active_jit_permissions(session['user_id'])
+    pending_requests = db.execute_query("""
+        SELECT * FROM jit_permissions 
+        WHERE user_id = ? AND status = 'pending'
+    """, (session['user_id'],), fetchall=True) or []
     
     return render_template('jit_request.html',
-                         active_jit_permissions=active_permissions)
+                         pending_requests=pending_requests)
+
+@app.route('/admin/jit-requests')
+@require_permission('user_management', 'read')
+def jit_requests():
+    """View pending JIT requests (admin only)"""
+    if not RBACSystem.can_manage_users(session['role']):
+        flash('Access denied', 'error')
+        return redirect(url_for('dashboard'))
+    
+    pending_requests = db.get_pending_jit_requests()
+    
+    return render_template('jit_requests.html',
+                         pending_requests=pending_requests,
+                         RESOURCE_ROLES=RESOURCE_ROLES)
+
+@app.route('/admin/jit-approve/<int:permission_id>', methods=['POST'])
+@require_permission('user_management', 'write')
+def approve_jit_request(permission_id):
+    """Approve a JIT request"""
+    if not RBACSystem.can_manage_users(session['role']):
+        flash('Access denied', 'error')
+        return redirect(url_for('dashboard'))
+    
+    duration = int(request.form.get('duration', 60))
+    
+    success = db.approve_jit_permission(permission_id, session['user_id'], duration)
+    
+    if success:
+        # Get request info for logging
+        request_info = db.execute_query(
+            "SELECT jp.*, u.username FROM jit_permissions jp JOIN users u ON jp.user_id = u.id WHERE jp.id = ?",
+            (permission_id,), fetchone=True
+        )
+        
+        if request_info:
+            flash(f'JIT request approved for {request_info["username"]}', 'success')
+            
+            db.log_action(
+                session['user_id'],
+                'jit_permission_approve',
+                f"Approved JIT permission '{request_info['permission_type']}' for user '{request_info['username']}'",
+                'jit_system'
+            )
+    else:
+        flash('Failed to approve JIT request', 'error')
+    
+    return redirect(url_for('jit_requests'))
+
+@app.route('/admin/jit-deny/<int:permission_id>', methods=['POST'])
+@require_permission('user_management', 'write')
+def deny_jit_request(permission_id):
+    """Deny a JIT request"""
+    if not RBACSystem.can_manage_users(session['role']):
+        flash('Access denied', 'error')
+        return redirect(url_for('dashboard'))
+    
+    success = db.deny_jit_permission(permission_id, session['user_id'])
+    
+    if success:
+        # Get request info for logging
+        request_info = db.execute_query(
+            "SELECT jp.*, u.username FROM jit_permissions jp JOIN users u ON jp.user_id = u.id WHERE jp.id = ?",
+            (permission_id,), fetchone=True
+        )
+        
+        if request_info:
+            flash(f'JIT request denied for {request_info["username"]}', 'success')
+            
+            db.log_action(
+                session['user_id'],
+                'jit_permission_deny',
+                f"Denied JIT permission '{request_info['permission_type']}' for user '{request_info['username']}'",
+                'jit_system'
+            )
+    else:
+        flash('Failed to deny JIT request', 'error')
+    
+    return redirect(url_for('jit_requests'))
 
 @app.route('/admin/audit/logs')
 @require_permission('audit_logs', 'read')
@@ -1037,15 +1150,19 @@ def cleanup_database():
 
 @app.route('/logout')
 def logout():
+    # Clear session token cookie if exists
     session_token = request.cookies.get('session_token')
     
     if session_token:
         db.delete_session(session_token)
     
+    # Clear all session data
     session.clear()
     
+    # Create response and clear cookie
     response = make_response(redirect(url_for('login')))
     response.set_cookie('session_token', '', expires=0)
+    response.set_cookie('session', '', expires=0)
     
     flash('Logout successful!', 'success')
     return response
